@@ -34,13 +34,15 @@ Users submit jobs to the Master via an HTTP POST request containing a JSON paylo
 - The path/URL to the Reduce plugin (`.so` file).
 - The location of the input data (e.g., a shared network mount path like `/mnt/nfs/data` or an object storage URI).
 - The desired location for the final output.
-- The number of Reduce tasks ($R$).
+- The number of Map and Reduce tasks ($M$, $R$).
 
-**Queue Semantics & Greedy Concurrency:** The Master maintains a priority queue of submitted jobs based on FIFO (First-In-First-Out). However, to maximize cluster utilization, Gomr uses **Greedy Job Concurrency**. If the oldest job is temporarily bottlenecked (e.g., all its Map tasks are running, and it is waiting for them to finish before starting Reduce tasks), the Master will freely assign tasks from the next job in the queue to any idle workers. **Job Cancellation:** If a job is cancelled via the API, the Master removes it from the queue. If the cancelled job is currently running, the Master marks it as aborted, ignores any further task completions for it, and uses the worker's next heartbeat response to signal an abort of the in-flight task.
+**Queue Semantics:** The Master maintains a strict FIFO (First-In-First-Out) queue for submitted jobs. To simplify resource allocation, jobs are processed sequentially (one active job at a time).
+
+**Job IDs & Cancellation:** Each job is assigned a unique Job ID upon submission. When a worker is assigned a task, it receives the corresponding Job ID. The worker then includes this Job ID in all subsequent heartbeats (while busy) and task completion reports. If a job is cancelled via the API (`DELETE /jobs/{id}`), the Master removes it from the queue. If the cancelled job is currently running, the Master marks it as aborted. When the Master receives a heartbeat or completion report referencing an aborted Job ID, the Master uses the heartbeat response to explicitly instruct the worker to immediately abort its in-flight task and return to an "Idle" state.
 
 **Pull-Based Scheduling & Backpressure:** The Master does not actively push tasks to workers. Instead, it relies on a pull-based model piggybacked on standard RPC heartbeats. When a worker sends a heartbeat with a status of "Idle", the Master checks the job queue and replies to the heartbeat with a new task assignment. This naturally applies backpressure: the Master only gives work to workers that are proven to be alive and have explicit capacity, preventing overload.
 
-**Bring Your Own Storage (BYOS) & Data Locality:** Gomr does not implement a distributed file system. It assumes that the input data, plugin files, and final output destinations provided in the job submission are globally accessible by all worker nodes (e.g., via an NFS mount over Tailscale, or cloud object storage). Because storage is entirely decoupled from compute in this model, **Gomr intentionally ignores data locality**; any worker is considered equally "close" to the input data.
+**Bring Your Own Storage (BYOS) & Data Locality:** Gomr does not implement a distributed file system, nor does the Master host a file server for the `.so` plugins. It assumes that the input data, the `.so` plugin files, and the final output destinations provided in the job submission are globally accessible by all worker nodes (e.g., via an NFS mount over Tailscale, an S3-compatible object store, or generic HTTP URLs). Because storage is entirely decoupled from compute in this model, **Gomr intentionally ignores data locality**; any worker is considered equally "close" to the input data.
 
 ### 3.2 Map Phase
 
