@@ -27,7 +27,8 @@ go.work.sum
 
 # env file
 .env
-
+secrets
+*txt
 # Editor/IDE
 # .idea/
 # .vscode/

@@ -42,7 +42,9 @@ Users submit jobs to the Master via an HTTP POST request containing a JSON paylo
 
 **Pull-Based Scheduling & Backpressure:** The Master does not actively push tasks to workers. Instead, it relies on a pull-based model piggybacked on standard RPC heartbeats. When a worker sends a heartbeat with a status of "Idle", the Master checks the job queue and replies to the heartbeat with a new task assignment. This naturally applies backpressure: the Master only gives work to workers that are proven to be alive and have explicit capacity, preventing overload.
 
-**Bring Your Own Storage (BYOS) & Data Locality:** Gomr does not implement a distributed file system, nor does the Master host a file server for the `.so` plugins. It assumes that the input data, the `.so` plugin files, and the final output destinations provided in the job submission are globally accessible by all worker nodes (e.g., via an NFS mount over Tailscale, an S3-compatible object store, or generic HTTP URLs). Because storage is entirely decoupled from compute in this model, **Gomr intentionally ignores data locality**; any worker is considered equally "close" to the input data.
+**Bring Your Own Storage (BYOS) & Data Locality:** Gomr does not implement a distributed file system, nor does the Master host a file server for the `.so` plugins. It assumes that the input data, the `.so` plugin files, and the final output destinations are stored in **S3-compatible object storage** (e.g., AWS S3, MinIO, GCS) accessible by all worker nodes. Because storage is entirely decoupled from compute in this model, **Gomr intentionally ignores data locality**; any worker is considered equally "close" to the input data.
+
+**Intermediate Storage:** Unlike input and output data, intermediate files generated during the Map phase are stored on the **worker's local storage** and served directly by that worker via HTTP. This avoids the overhead of writing transient data to object storage.
 
 ### 3.2 Map Phase
 
@@ -57,8 +59,8 @@ Users submit jobs to the Master via an HTTP POST request containing a JSON paylo
 1. Worker B sends an RPC heartbeat with status "Idle". The Master replies by assigning a Reduce task (e.g., partition 5).
 2. The Master provides Worker B with a list of HTTP URLs (pointing to the Map workers that hold partition 5).
 3. Worker B downloads all partition 5 files using HTTP GET.
-4. Worker B sorts the keys, runs the `.so` `Reduce` function, and writes the final output to a temporary file (e.g., `part-5.tmp`) on the shared storage.
-5. **Atomic Rename:** Once the file is completely written and flushed to disk, Worker B performs an atomic `rename` from `part-5.tmp` to its final name (e.g., `part-5.txt`). This prevents partial or corrupted files from being left behind if a Reduce worker crashes mid-write.
+4. Worker B sorts the keys, runs the `.so` `Reduce` function, and writes the final output to a temporary object (e.g., `part-5.tmp`) in the **S3-compatible object storage**.
+5. **Finalize Output:** Once the object is fully written, Worker B ensures the final result is available at its final name (e.g., `part-5.txt`). Most S3-compatible providers handle atomic writes for single objects, preventing partial or corrupted results.
 6. Worker B reports completion to the Master via its next RPC heartbeat.
 
 ## 4. Fault Tolerance
@@ -66,7 +68,7 @@ Users submit jobs to the Master via an HTTP POST request containing a JSON paylo
 - **Worker Identity & Registration:** Worker IDs are ephemeral and randomly generated on startup (e.g., a UUID). When a worker process crashes and restarts, it registers as a completely new worker. The Master does not attempt to map returning workers to past identities.
 - **Heartbeats:** Workers ping the Master periodically via RPC. If the Master misses heartbeats for a configured timeout, the worker is marked as dead. Any in-progress tasks on a dead worker are reset to "idle" and reassigned.
 - **Reduce Phase Completion Race:** If a Map worker dies after finishing its task, its HTTP server goes offline. If a Reduce worker tries to fetch files from it and fails (e.g., connection refused mid-transfer), the Reduce worker reports the failure to the Master. The Master then resets _both_ the failed Reduce task and the corresponding dead Map task back to "idle". The Map task will be reassigned to a new worker to regenerate the missing files, and the Reduce task will be retried once all Map outputs are available again.
-- **Master Recovery (Checkpointing):** The Master takes periodic **snapshots (checkpoints)** of the cluster state (job queue, task statuses) and saves them as JSON to the shared storage. Snapshotting is preferred over Write-Ahead Logging (WAL) for its simplicity and bounded size. If the Master restarts, it loads the latest snapshot into memory to resume coordination. Since MapReduce tasks are idempotent, losing a few seconds of state between snapshots simply results in safe, redundant task re-execution.
+- **Master Recovery (Checkpointing):** The Master takes periodic **snapshots (checkpoints)** of the cluster state (job queue, task statuses) and saves them as JSON to the **S3-compatible object storage**. Snapshotting is preferred over Write-Ahead Logging (WAL) for its simplicity and bounded size. If the Master restarts, it loads the latest snapshot into memory to resume coordination. Since MapReduce tasks are idempotent, losing a few seconds of state between snapshots simply results in safe, redundant task re-execution.
 - **Speculative Execution (Straggler Mitigation):** If a worker is running a task unusually slowly (e.g., due to a failing disk or high CPU load), it creates a bottleneck. If a job is near completion but waiting on a straggler, the Master will speculatively assign the same task to another idle worker that requests work via a heartbeat. Whichever worker completes the task first "wins," and the Master instructs the slower worker to abort.
 
 ## 5. Intermediate File Lifecycle & Cleanup
