@@ -44,3 +44,18 @@ run-master: build
 run-worker: build
 	@echo "Starting Worker node..."
 	./$(BIN_DIR)/$(APP_NAME) worker -master localhost:8080 -port 8081
+
+# Plugin configuration
+PLUGIN_NAME ?= wordcount
+PLUGIN_PATH ?= ./plugin/$(PLUGIN_NAME)
+
+# Build the plugin
+build-plugin:
+	@echo "Building $(PLUGIN_NAME) plugin from $(PLUGIN_PATH)..."
+	@mkdir -p $(BIN_DIR)/plugins
+	go build -buildmode=plugin -o $(BIN_DIR)/plugins/$(PLUGIN_NAME).so $(PLUGIN_PATH)
+
+# Upload plugin to S3
+upload-plugin: build-plugin
+	@echo "Uploading $(PLUGIN_NAME) plugin to S3..."
+	aws --endpoint-url http://thia:3900 s3 cp $(BIN_DIR)/plugins/$(PLUGIN_NAME).so s3://thia/plugins/$(PLUGIN_NAME).so
