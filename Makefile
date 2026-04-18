@@ -59,3 +59,23 @@ build-plugin:
 upload-plugin: build-plugin
 	@echo "Uploading $(PLUGIN_NAME) plugin to S3..."
 	aws --endpoint-url http://thia:3900 s3 cp $(BIN_DIR)/plugins/$(PLUGIN_NAME).so s3://thia/plugins/$(PLUGIN_NAME).so
+
+# Upload plugin data to S3
+upload-data:
+	@echo "Uploading $(PLUGIN_NAME) data to S3..."
+	aws --endpoint-url http://thia:3900 s3 sync $(PLUGIN_PATH)/data/ s3://thia/data/$(PLUGIN_NAME)/
+
+# Clean plugin and data from S3
+clean-s3:
+	@echo "Cleaning $(PLUGIN_NAME) from S3..."
+	aws --endpoint-url http://thia:3900 s3 rm s3://thia/plugins/$(PLUGIN_NAME).so || true
+	aws --endpoint-url http://thia:3900 s3 rm s3://thia/data/$(PLUGIN_NAME)/ --recursive || true
+
+# List files in S3
+ls:
+	@echo "Listing S3 contents..."
+	@if [ -z "$(DIR)" ]; then \
+		aws --endpoint-url http://thia:3900 s3 ls s3://thia/ ; \
+	else \
+		aws --endpoint-url http://thia:3900 s3 ls s3://thia/$(DIR)/ ; \
+	fi

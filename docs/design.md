@@ -32,9 +32,11 @@ Users submit jobs to the Master via an HTTP POST request containing a JSON paylo
 
 - The path/URL to the Map plugin (`.so` file).
 - The path/URL to the Reduce plugin (`.so` file).
-- The location of the input data (e.g., a shared network mount path like `/mnt/nfs/data` or an object storage URI).
+- The location of the input data (e.g., an S3 prefix like `s3://bucket/data/`).
 - The desired location for the final output.
 - The number of Map and Reduce tasks ($M$, $R$).
+
+**Data Splitting:** Gomr expects input data to be pre-split. The user or an external ingestion pipeline must divide the dataset into multiple smaller objects under the specified input prefix in the S3-compatible storage (e.g., `data/chunk-1.txt`, `data/chunk-2.txt`). When the Master receives a job, it lists the objects under the input prefix. Each object becomes exactly one Map task. The Master does not download or split the files itself; it simply assigns the object URIs as tasks to the workers, and the workers download the files directly from S3.
 
 **Queue Semantics:** The Master maintains a strict FIFO (First-In-First-Out) queue for submitted jobs. To simplify resource allocation, jobs are processed sequentially (one active job at a time).
 
