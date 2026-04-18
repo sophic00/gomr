@@ -43,7 +43,15 @@ const (
 	JobStatusInProgress JobStatus = "InProgress"
 	JobStatusCompleted  JobStatus = "Completed"
 	JobStatusFailed     JobStatus = "Failed"
+	JobStatusAborted    JobStatus = "Aborted"
 )
+
+type JobStatusInfo struct {
+	JobID          string    `json:"job_id"`
+	Status         JobStatus `json:"status"`
+	MapProgress    string    `json:"map_progress"`
+	ReduceProgress string    `json:"reduce_progress"`
+}
 
 type Master struct {
 	port int
