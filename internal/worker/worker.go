@@ -21,18 +21,24 @@ const defaultHeartbeatInterval = 5 * time.Second
 // Start initializes and runs the Gomr Worker on the given port,
 // connecting to the Master gRPC endpoint.
 func Start(cfg *config.Config) error {
-	workerID := uuid.NewString()
+	w := &Worker{
+		ID:             uuid.NewString(),
+		MasterGRPCAddr: cfg.MasterGRPCAddr,
+		HTTPAddr:       net.JoinHostPort(cfg.WorkerHost, fmt.Sprintf("%d", cfg.WorkerPort)),
+		State:          gomrv1.WorkerState_WORKER_STATE_IDLE,
+	}
+
 	listenAddr := fmt.Sprintf(":%d", cfg.WorkerPort)
-	advertisedAddr := net.JoinHostPort(cfg.WorkerHost, fmt.Sprintf("%d", cfg.WorkerPort))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, "ok")
+	mux.HandleFunc("/health", func(httpW http.ResponseWriter, r *http.Request) {
+		httpW.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(httpW, "ok")
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, "Worker HTTP Data Plane on %s\n", advertisedAddr)
+	// placeholder: will be used for serving intermediate result
+	mux.HandleFunc("/", func(httpW http.ResponseWriter, r *http.Request) {
+		httpW.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(httpW, "Worker HTTP Data Plane on %s\n", w.HTTPAddr)
 	})
 
 	listener, err := net.Listen("tcp", listenAddr)
@@ -43,27 +49,27 @@ func Start(cfg *config.Config) error {
 	serverErrCh := make(chan error, 1)
 	httpServer := &http.Server{Handler: mux}
 	go func() {
-		log.Printf("Worker HTTP server listening on %s (advertised as %s)", listenAddr, advertisedAddr)
+		log.Printf("Worker HTTP server listening on %s (advertised as %s)", listenAddr, w.HTTPAddr)
 		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrCh <- err
 		}
 		close(serverErrCh)
 	}()
 
-	conn, err := grpc.NewClient(cfg.MasterGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(w.MasterGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("failed to connect to master gRPC endpoint %s: %w", cfg.MasterGRPCAddr, err)
+		return fmt.Errorf("failed to connect to master gRPC endpoint %s: %w", w.MasterGRPCAddr, err)
 	}
 	defer conn.Close()
 
 	client := gomrv1.NewMasterServiceClient(conn)
-	heartbeatInterval, err := registerWorker(client, workerID, advertisedAddr)
+	heartbeatInterval, err := registerWorker(client, w)
 	if err != nil {
 		_ = httpServer.Shutdown(context.Background())
 		return err
 	}
 
-	go startHeartbeatLoop(client, workerID, heartbeatInterval)
+	go startHeartbeatLoop(client, w, heartbeatInterval)
 
 	if err, ok := <-serverErrCh; ok && err != nil {
 		return fmt.Errorf("worker HTTP server failed: %w", err)
@@ -72,15 +78,19 @@ func Start(cfg *config.Config) error {
 	return nil
 }
 
-func registerWorker(client gomrv1.MasterServiceClient, workerID, httpAddr string) (time.Duration, error) {
+func registerWorker(client gomrv1.MasterServiceClient, w *Worker) (time.Duration, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := client.RegisterWorker(ctx, &gomrv1.RegisterWorkerRequest{
-		WorkerId: workerID,
-		HttpAddr: httpAddr,
-		State:    gomrv1.WorkerState_WORKER_STATE_IDLE,
-	})
+	w.mu.RLock()
+	req := &gomrv1.RegisterWorkerRequest{
+		WorkerId: w.ID,
+		HttpAddr: w.HTTPAddr,
+		State:    w.State,
+	}
+	w.mu.RUnlock()
+
+	resp, err := client.RegisterWorker(ctx, req)
 	if err != nil {
 		return 0, fmt.Errorf("worker registration failed: %w", err)
 	}
@@ -88,14 +98,14 @@ func registerWorker(client gomrv1.MasterServiceClient, workerID, httpAddr string
 		return 0, fmt.Errorf("worker registration rejected: %s", resp.GetMessage())
 	}
 
-	log.Printf("Registered worker %s with master; heartbeat interval=%ds timeout=%ds", workerID, resp.GetHeartbeatIntervalSeconds(), resp.GetWorkerTimeoutSeconds())
+	log.Printf("Registered worker %s with master; heartbeat interval=%ds timeout=%ds", w.ID, resp.GetHeartbeatIntervalSeconds(), resp.GetWorkerTimeoutSeconds())
 	if secs := resp.GetHeartbeatIntervalSeconds(); secs > 0 {
 		return time.Duration(secs) * time.Second, nil
 	}
 	return defaultHeartbeatInterval, nil
 }
 
-func startHeartbeatLoop(client gomrv1.MasterServiceClient, workerID string, interval time.Duration) {
+func startHeartbeatLoop(client gomrv1.MasterServiceClient, w *Worker, interval time.Duration) {
 	if interval <= 0 {
 		interval = defaultHeartbeatInterval
 	}
@@ -105,15 +115,21 @@ func startHeartbeatLoop(client gomrv1.MasterServiceClient, workerID string, inte
 
 	for range ticker.C {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, err := client.Heartbeat(ctx, &gomrv1.HeartbeatRequest{
-			WorkerId: workerID,
-			State:    gomrv1.WorkerState_WORKER_STATE_IDLE,
-		})
+
+		w.mu.RLock()
+		req := &gomrv1.HeartbeatRequest{
+			WorkerId:    w.ID,
+			State:       w.State,
+			CurrentTask: w.CurrentTask,
+		}
+		w.mu.RUnlock()
+
+		_, err := client.Heartbeat(ctx, req)
 		cancel()
 		if err != nil {
-			log.Printf("Failed to send heartbeat for worker %s: %v", workerID, err)
+			log.Printf("Failed to send heartbeat for worker %s: %v", w.ID, err)
 			continue
 		}
-		log.Printf("Sent heartbeat for worker %s", workerID)
+		log.Printf("Sent heartbeat for worker %s (state: %s)", w.ID, req.State.String())
 	}
 }
