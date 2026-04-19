@@ -102,4 +102,5 @@ type Worker struct {
 	State         gomrv1.WorkerState
 	RegisteredAt  time.Time
 	LastHeartbeat time.Time
+	CurrentTask   *gomrv1.TaskRef
 }

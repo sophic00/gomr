@@ -82,6 +82,7 @@ func (s *controlServer) Heartbeat(ctx context.Context, req *gomrv1.HeartbeatRequ
 
 	worker.State = req.GetState()
 	worker.LastHeartbeat = time.Now()
+	worker.CurrentTask = req.GetCurrentTask()
 
 	return &gomrv1.HeartbeatResponse{}, nil
 }

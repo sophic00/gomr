@@ -113,24 +113,37 @@ func (m *Master) monitorWorkers() {
 // resetWorkerTasksLocked resets any tasks that were assigned to a worker that is now considered dead.
 // It assumes m.mu is already locked for writing.
 func (m *Master) resetWorkerTasksLocked(workerID string) {
-	for _, job := range m.jobs {
-		if job.Status == JobStatusCompleted || job.Status == JobStatusAborted {
-			continue
-		}
+	worker, exists := m.workers[workerID]
+	if !exists || worker.CurrentTask == nil {
+		return
+	}
 
+	taskRef := worker.CurrentTask
+	job, exists := m.jobs[taskRef.JobId]
+	if !exists || job.Status == JobStatusCompleted || job.Status == JobStatusAborted {
+		return
+	}
+
+	if taskRef.Phase == gomrv1.TaskPhase_TASK_PHASE_MAP {
 		for _, mt := range job.MapTasks {
-			if mt.Status == TaskStatusInProgress && mt.WorkerID == workerID {
-				log.Printf("Resetting Map task %s for job %s from dead worker %s", mt.ID, job.ID, workerID)
-				mt.Status = TaskStatusIdle
-				mt.WorkerID = ""
+			if mt.ID == taskRef.TaskId {
+				if mt.Status == TaskStatusInProgress && mt.WorkerID == workerID {
+					log.Printf("Resetting Map task %s for job %s from dead worker %s", mt.ID, job.ID, workerID)
+					mt.Status = TaskStatusIdle
+					mt.WorkerID = ""
+				}
+				break
 			}
 		}
-
+	} else if taskRef.Phase == gomrv1.TaskPhase_TASK_PHASE_REDUCE {
 		for _, rt := range job.ReduceTasks {
-			if rt.Status == TaskStatusInProgress && rt.WorkerID == workerID {
-				log.Printf("Resetting Reduce task %s for job %s from dead worker %s", rt.ID, job.ID, workerID)
-				rt.Status = TaskStatusIdle
-				rt.WorkerID = ""
+			if rt.ID == taskRef.TaskId {
+				if rt.Status == TaskStatusInProgress && rt.WorkerID == workerID {
+					log.Printf("Resetting Reduce task %s for job %s from dead worker %s", rt.ID, job.ID, workerID)
+					rt.Status = TaskStatusIdle
+					rt.WorkerID = ""
+				}
+				break
 			}
 		}
 	}
