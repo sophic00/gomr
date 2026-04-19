@@ -111,12 +111,18 @@ func (m *Master) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleStatus retrieves progress of all jobs
+// handleStatus retrieves progress of all jobs and worker statistics
 func (m *Master) handleStatus(w http.ResponseWriter, r *http.Request) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var statuses []JobStatusInfo
+	workerStats := make(map[string]int)
+	for _, w := range m.workers {
+		stateStr := w.State.String()
+		workerStats[stateStr]++
+	}
+
+	var jobStatuses []JobStatusInfo
 	for _, job := range m.jobs {
 		mapCompleted := 0
 		for _, mt := range job.MapTasks {
@@ -132,7 +138,7 @@ func (m *Master) handleStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		statuses = append(statuses, JobStatusInfo{
+		jobStatuses = append(jobStatuses, JobStatusInfo{
 			JobID:          job.ID,
 			Status:         job.Status,
 			MapProgress:    fmt.Sprintf("%d/%d", mapCompleted, len(job.MapTasks)),
@@ -140,8 +146,13 @@ func (m *Master) handleStatus(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	resp := SystemStatusResponse{
+		Workers: workerStats,
+		Jobs:    jobStatuses,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(statuses)
+	json.NewEncoder(w).Encode(resp)
 }
 
 // handleDelete cancels a specific job and cleans up its data

@@ -55,6 +55,11 @@ type JobStatusInfo struct {
 	ReduceProgress string    `json:"reduce_progress"`
 }
 
+type SystemStatusResponse struct {
+	Workers map[string]int  `json:"workers"`
+	Jobs    []JobStatusInfo `json:"jobs"`
+}
+
 type Master struct {
 	httpPort int
 	grpcPort int
