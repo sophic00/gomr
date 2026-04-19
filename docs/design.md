@@ -10,8 +10,8 @@ Gomr is a distributed MapReduce framework implemented in Go. It is distributed a
 
 The application is compiled into a single executable `gomr`.
 
-- **Master Mode:** Started via `gomr master --http-port <master_http_port> --grpc-port <master_grpc_port>`. It runs as a persistent daemon, coordinating workers, managing a queue of submitted jobs, tracking task state, and handling fault tolerance. It exposes an HTTP API for job submission and status on the HTTP port, and a gRPC control-plane endpoint for workers on the gRPC port.
-- **Worker Mode:** Started via `gomr worker --master-grpc <master_ip:grpc_port> --port <worker_http_port>`. It registers with the master over gRPC, executes assigned map or reduce tasks, and serves intermediate files over HTTP.
+- **Master Mode:** Started via `gomr master`. It runs as a persistent daemon, coordinating workers, managing a queue of submitted jobs, tracking task state, and handling fault tolerance. It loads its configuration (such as HTTP and gRPC ports) from `config.toml`. It exposes an HTTP API for job submission and status, and a gRPC control-plane endpoint for workers.
+- **Worker Mode:** Started via `gomr worker`. It loads its configuration (such as the Master's gRPC address and its own HTTP port) from `config.toml`. It registers with the master over gRPC, executes assigned map or reduce tasks, and serves intermediate files over HTTP.
 
 ### 2.2 Network & Security
 

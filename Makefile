@@ -51,12 +51,12 @@ proto:
 # Run the master node locally
 run-master: build
 	@echo "Starting Master node..."
-	./$(BIN_DIR)/$(APP_NAME) master -http-port 8080 -grpc-port 9090
+	./$(BIN_DIR)/$(APP_NAME) master
 
 # Run a worker node locally
 run-worker: build
 	@echo "Starting Worker node..."
-	./$(BIN_DIR)/$(APP_NAME) worker -master-grpc localhost:9090 -port 8081
+	./$(BIN_DIR)/$(APP_NAME) worker
 
 # Plugin configuration
 PLUGIN_NAME ?= wordcount

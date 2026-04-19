@@ -9,8 +9,8 @@ import (
 type Config struct {
 	MasterHTTPPort int    `mapstructure:"master_http_port"`
 	MasterGRPCPort int    `mapstructure:"master_grpc_port"`
-	MasterGRPCAddr string `mapstructure:"master_grpc_addr"`
-	WorkerHost     string `mapstructure:"worker_host"`
+	MasterGRPCAddr string `mapstructure:"master_grpc_addr"` // used by worker to reach master
+	WorkerHost     string `mapstructure:"worker_host"`      //worker to tell master it's addr during registration
 	WorkerPort     int    `mapstructure:"worker_port"`
 
 	S3Endpoint         string `mapstructure:"s3_endpoint"`
@@ -34,7 +34,6 @@ func Load() (*Config, error) {
 	viper.SetDefault("worker_port", 8081)
 	viper.SetDefault("s3_endpoint", "thia:3900")
 
-	// Read config file if present
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, err
