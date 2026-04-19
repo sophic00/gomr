@@ -4,28 +4,29 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/sophic00/gomr/internal/config"
 )
 
-func NewMaster(port int) (*Master, error) {
-	endpoint := os.Getenv("S3_ENDPOINT")
-	if endpoint == "" {
-		endpoint = "thia:3900"
+func NewMaster(cfg *config.Config) (*Master, error) {
+	creds := credentials.NewEnvAWS()
+	if cfg.AWSAccessKeyID != "" {
+		creds = credentials.NewStaticV4(cfg.AWSAccessKeyID, cfg.AWSSecretAccessKey, "")
 	}
 
-	minioClient, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewEnvAWS(),
+	minioClient, err := minio.New(cfg.S3Endpoint, &minio.Options{
+		Creds:  creds,
 		Secure: false,
+		Region: cfg.AWSRegion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize S3 client: %v", err)
 	}
 
 	return &Master{
-		port:     port,
+		port:     cfg.MasterPort,
 		jobs:     make(map[string]*Job),
 		queue:    make(chan string, 1000),
 		s3Client: minioClient,
@@ -33,8 +34,8 @@ func NewMaster(port int) (*Master, error) {
 }
 
 // Start initializes and runs the Gomr Master daemon on the given port.
-func Start(port int) error {
-	m, err := NewMaster(port)
+func Start(cfg *config.Config) error {
+	m, err := NewMaster(cfg)
 	if err != nil {
 		return err
 	}
