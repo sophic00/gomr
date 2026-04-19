@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+package gomr.v1;
+
+option go_package = "github.com/sophic00/gomr/proto/gomr/v1;gomrv1";
+
+service MasterService {
+  rpc RegisterWorker(RegisterWorkerRequest) returns (RegisterWorkerResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+enum WorkerState {
+  WORKER_STATE_IDLE = 0;
+  WORKER_STATE_BUSY = 1;
+  WORKER_STATE_DRAINING = 2;
+  WORKER_STATE_DEAD = 3;
+}
+
+enum TaskPhase {
+  TASK_PHASE_MAP = 0;
+  TASK_PHASE_REDUCE = 1;
+  TASK_PHASE_PROMOTION = 2;
+}
+
+enum TaskResultState {
+  TASK_RESULT_STATE_SUCCESS = 0;
+  TASK_RESULT_STATE_FAILED = 1;
+  TASK_RESULT_STATE_ABORTED = 2;
+}
+
+message RegisterWorkerRequest {
+  string worker_id = 1;
+  string http_addr = 2;
+  WorkerState state = 3;
+}
+
+message RegisterWorkerResponse {
+  bool accepted = 1;
+  string message = 2;
+  uint32 heartbeat_interval_seconds = 3;
+  uint32 worker_timeout_seconds = 4;
+}
+
+message TaskRef {
+  string job_id = 1;
+  string task_id = 2;
+  TaskPhase phase = 3;
+  string attempt_id = 4;
+}
+
+message TaskResult {
+  TaskRef task = 1;
+  TaskResultState state = 2;
+  string error_message = 3;
+
+  // Map tasks publish one intermediate file per reduce partition.
+  repeated string partition_urls = 4;
+
+  // Reduce and promotion tasks report their object storage output.
+  string output_object = 5;
+}
+
+message HeartbeatRequest {
+  string worker_id = 1;
+  WorkerState state = 2;
+
+  // Set when the worker is BUSY.
+  TaskRef current_task = 3;
+
+  // Set when the worker is reporting the outcome of its last task attempt.
+  TaskResult last_result = 4;
+}
+
+message MapAssignment {
+  string job_id = 1;
+  string task_id = 2;
+  string input_uri = 3;
+  string plugin_uri = 4;
+  uint32 reduce_partitions = 5;
+}
+
+message ReduceAssignment {
+  string job_id = 1;
+  string task_id = 2;
+  uint32 partition = 3;
+  string plugin_uri = 4;
+  repeated string input_urls = 5;
+  string output_prefix = 6;
+}
+
+message PromotionAssignment {
+  string job_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string temp_object = 4;
+  string final_object = 5;
+}
+
+message Assignment {
+  oneof kind {
+    MapAssignment map = 1;
+    ReduceAssignment reduce = 2;
+    PromotionAssignment promotion = 3;
+  }
+}
+
+message HeartbeatResponse {
+  bool should_abort_current_task = 1;
+  Assignment assignment = 2;
+}

@@ -2,8 +2,10 @@ package master
 
 import (
 	"sync"
+	"time"
 
 	"github.com/minio/minio-go/v7"
+	gomrv1 "github.com/sophic00/gomr/proto/gomr/v1"
 )
 
 // JobSubmission represents the expected JSON payload for POST /submit
@@ -54,13 +56,17 @@ type JobStatusInfo struct {
 }
 
 type Master struct {
-	port int
+	httpPort int
+	grpcPort int
 
-	mu    sync.RWMutex
-	jobs  map[string]*Job
-	queue chan string
+	mu      sync.RWMutex
+	jobs    map[string]*Job
+	workers map[string]*Worker
+	queue   chan string
 
-	s3Client *minio.Client
+	s3Client          *minio.Client
+	heartbeatInterval time.Duration
+	workerTimeout     time.Duration
 }
 
 type Job struct {
@@ -83,4 +89,12 @@ type JobSubmitResponse struct {
 	MapTasksCount    int    `json:"map_tasks_count"`
 	ReduceTasksCount int    `json:"reduce_tasks_count"`
 	QueueSize        int    `json:"queue_size"`
+}
+
+type Worker struct {
+	ID            string
+	HTTPAddr      string
+	State         gomrv1.WorkerState
+	RegisteredAt  time.Time
+	LastHeartbeat time.Time
 }

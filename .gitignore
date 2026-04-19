@@ -9,6 +9,9 @@
 *.dylib
 bin/
 gomr
+!proto/
+!proto/gomr/
+!proto/gomr/**
 
 # Test binary, built with `go test -c`
 *.test

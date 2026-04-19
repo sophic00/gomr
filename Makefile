@@ -1,10 +1,12 @@
-.PHONY: all build clean test run-master run-worker fmt vet
+.PHONY: all build clean test run-master run-worker fmt vet proto
 
 # Binary name
 APP_NAME := gomr
 
 # Build directory
 BIN_DIR := bin
+
+PROTO_FILES := $(shell find proto -name '*.proto' -print)
 
 # Default target
 all: build
@@ -35,15 +37,26 @@ vet:
 	@echo "Vetting code..."
 	go vet ./...
 
+# Generate protobuf Go bindings
+proto:
+	@echo "Generating protobuf files..."
+	PATH="$(shell go env GOPATH)/bin:$$PATH" protoc \
+		--proto_path=. \
+		--go_out=. \
+		--go_opt=paths=source_relative \
+		--go-grpc_out=. \
+		--go-grpc_opt=paths=source_relative \
+		$(PROTO_FILES)
+
 # Run the master node locally
 run-master: build
 	@echo "Starting Master node..."
-	./$(BIN_DIR)/$(APP_NAME) master -port 8080
+	./$(BIN_DIR)/$(APP_NAME) master -http-port 8080 -grpc-port 9090
 
 # Run a worker node locally
 run-worker: build
 	@echo "Starting Worker node..."
-	./$(BIN_DIR)/$(APP_NAME) worker -master localhost:8080 -port 8081
+	./$(BIN_DIR)/$(APP_NAME) worker -master-grpc localhost:9090 -port 8081
 
 # Plugin configuration
 PLUGIN_NAME ?= wordcount

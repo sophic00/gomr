@@ -2,10 +2,12 @@
 # Copy this file to config.toml and configure it for your local or production setup.
 
 # Master Node Configuration
-master_port = 8080
+master_http_port = 8080
+master_grpc_port = 9090
 
 # Worker Node Configuration
-master_addr = "localhost:8080"
+master_grpc_addr = "localhost:9090"
+worker_host = "localhost"
 worker_port = 8081
 
 # Storage Configuration (S3 / MinIO)

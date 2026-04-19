@@ -7,9 +7,11 @@ import (
 )
 
 type Config struct {
-	MasterPort int    `mapstructure:"master_port"`
-	MasterAddr string `mapstructure:"master_addr"`
-	WorkerPort int    `mapstructure:"worker_port"`
+	MasterHTTPPort int    `mapstructure:"master_http_port"`
+	MasterGRPCPort int    `mapstructure:"master_grpc_port"`
+	MasterGRPCAddr string `mapstructure:"master_grpc_addr"`
+	WorkerHost     string `mapstructure:"worker_host"`
+	WorkerPort     int    `mapstructure:"worker_port"`
 
 	S3Endpoint         string `mapstructure:"s3_endpoint"`
 	AWSAccessKeyID     string `mapstructure:"aws_access_key_id"`
@@ -25,8 +27,10 @@ func Load() (*Config, error) {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
-	viper.SetDefault("master_port", 8080)
-	viper.SetDefault("master_addr", "localhost:8080")
+	viper.SetDefault("master_http_port", 8080)
+	viper.SetDefault("master_grpc_port", 9090)
+	viper.SetDefault("master_grpc_addr", "localhost:9090")
+	viper.SetDefault("worker_host", "localhost")
 	viper.SetDefault("worker_port", 8081)
 	viper.SetDefault("s3_endpoint", "thia:3900")
 

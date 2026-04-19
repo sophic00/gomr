@@ -3,11 +3,15 @@ package master
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/sophic00/gomr/internal/config"
+	gomrv1 "github.com/sophic00/gomr/proto/gomr/v1"
+	"google.golang.org/grpc"
 )
 
 func NewMaster(cfg *config.Config) (*Master, error) {
@@ -26,10 +30,14 @@ func NewMaster(cfg *config.Config) (*Master, error) {
 	}
 
 	return &Master{
-		port:     cfg.MasterPort,
-		jobs:     make(map[string]*Job),
-		queue:    make(chan string, 1000),
-		s3Client: minioClient,
+		httpPort:          cfg.MasterHTTPPort,
+		grpcPort:          cfg.MasterGRPCPort,
+		jobs:              make(map[string]*Job),
+		workers:           make(map[string]*Worker),
+		queue:             make(chan string, 1000),
+		s3Client:          minioClient,
+		heartbeatInterval: 5 * time.Second,
+		workerTimeout:     15 * time.Second,
 	}, nil
 }
 
@@ -43,10 +51,40 @@ func Start(cfg *config.Config) error {
 }
 
 func (m *Master) Run() error {
-	addr := fmt.Sprintf(":%d", m.port)
+	httpAddr := fmt.Sprintf(":%d", m.httpPort)
+	grpcAddr := fmt.Sprintf(":%d", m.grpcPort)
 
 	mux := m.setupRoutes()
+	grpcServer := grpc.NewServer()
+	gomrv1.RegisterMasterServiceServer(grpcServer, &controlServer{master: m})
 
-	log.Printf("Master listening on %s\n", addr)
-	return http.ListenAndServe(addr, mux)
+	httpListener, err := net.Listen("tcp", httpAddr)
+	if err != nil {
+		return fmt.Errorf("failed to listen for master HTTP on %s: %w", httpAddr, err)
+	}
+
+	grpcListener, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		_ = httpListener.Close()
+		return fmt.Errorf("failed to listen for master gRPC on %s: %w", grpcAddr, err)
+	}
+
+	httpServer := &http.Server{Handler: mux}
+	errCh := make(chan error, 2)
+
+	go func() {
+		log.Printf("Master HTTP API listening on %s", httpAddr)
+		errCh <- httpServer.Serve(httpListener)
+	}()
+
+	go func() {
+		log.Printf("Master gRPC control plane listening on %s", grpcAddr)
+		errCh <- grpcServer.Serve(grpcListener)
+	}()
+
+	err = <-errCh
+	grpcServer.Stop()
+	_ = httpServer.Close()
+
+	return err
 }
