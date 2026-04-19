@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,6 +129,19 @@ func startHeartbeatLoop(client gomrv1.MasterServiceClient, w *Worker, interval t
 		cancel()
 		if err != nil {
 			log.Printf("Failed to send heartbeat for worker %s: %v", w.ID, err)
+			if strings.Contains(err.Error(), "not registered") {
+				log.Printf("Worker not registered (possibly master restarted). Attempting to re-register...")
+				newInterval, regErr := registerWorker(client, w)
+				if regErr != nil {
+					log.Printf("Re-registration failed: %v", regErr)
+				} else {
+					log.Printf("Re-registration successful.")
+					if newInterval != interval && newInterval > 0 {
+						interval = newInterval
+						ticker.Reset(interval)
+					}
+				}
+			}
 			continue
 		}
 		log.Printf("Sent heartbeat for worker %s (state: %s)", w.ID, req.State.String())
