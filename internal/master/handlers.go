@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -47,7 +47,7 @@ func (m *Master) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	objectCh := m.s3Client.ListObjects(ctx, bucket, opts)
 	for object := range objectCh {
 		if object.Err != nil {
-			log.Printf("Error listing S3 objects: %v", object.Err)
+			slog.Error("error listing S3 objects", "error", object.Err, "bucket", bucket, "prefix", prefix)
 			http.Error(w, "Failed to list input files", http.StatusInternalServerError)
 			return
 		}
@@ -118,7 +118,11 @@ func (m *Master) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Job %s submitted: %d Map tasks, %d Reduce tasks\n", jobID, len(mapTasks), sub.ReduceTasks)
+	slog.Info("job submitted",
+		"job_id", jobID,
+		"map_tasks", len(mapTasks),
+		"reduce_tasks", sub.ReduceTasks,
+	)
 
 	// 6. Send Response
 	resp := JobSubmitResponse{
@@ -209,14 +213,14 @@ func (m *Master) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 	// Clean up S3 in the background to not block the HTTP response
 	go func(j *Job) {
-		log.Printf("Cleaning up S3 for aborted job %s...", j.ID)
+		slog.Info("cleaning up S3 for aborted job", "job_id", j.ID)
 		ctx := context.Background()
 
 		// Attempt to delete final output prefix from S3
 		if err := deleteS3Prefix(ctx, m.s3Client, j.OutputPrefix); err != nil {
-			log.Printf("Failed to clean up output for job %s: %v", j.ID, err)
+			slog.Error("failed to clean up output", "job_id", j.ID, "error", err)
 		} else {
-			log.Printf("Cleanup finished for job %s", j.ID)
+			slog.Info("cleanup finished", "job_id", j.ID)
 		}
 	}(job)
 

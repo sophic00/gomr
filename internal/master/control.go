@@ -3,7 +3,7 @@ package master
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -59,7 +59,11 @@ func (s *controlServer) RegisterWorker(ctx context.Context, req *gomrv1.Register
 	}
 	s.master.mu.Unlock()
 
-	log.Printf("Registered worker %s at %s with state %s", req.GetWorkerId(), req.GetHttpAddr(), req.GetState().String())
+	slog.Info("registered worker",
+		"worker_id", req.GetWorkerId(),
+		"addr", req.GetHttpAddr(),
+		"state", req.GetState().String(),
+	)
 
 	return &gomrv1.RegisterWorkerResponse{
 		Accepted:                 true,

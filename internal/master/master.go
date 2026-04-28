@@ -3,7 +3,7 @@ package master
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os/signal"
@@ -80,12 +80,12 @@ func (m *Master) Run() error {
 	errCh := make(chan error, 2)
 
 	go func() {
-		log.Printf("Master HTTP API listening on %s", httpAddr)
+		slog.Info("master HTTP API listening", "addr", httpAddr)
 		errCh <- httpServer.Serve(httpListener)
 	}()
 
 	go func() {
-		log.Printf("Master gRPC control plane listening on %s", grpcAddr)
+		slog.Info("master gRPC control plane listening", "addr", grpcAddr)
 		errCh <- grpcServer.Serve(grpcListener)
 	}()
 
@@ -94,9 +94,9 @@ func (m *Master) Run() error {
 	// Wait for shutdown signal or server error.
 	select {
 	case <-ctx.Done():
-		log.Printf("Received shutdown signal, draining...")
+		slog.Info("received shutdown signal, draining...")
 	case err = <-errCh:
-		log.Printf("Server error: %v", err)
+		slog.Error("server error", "error", err)
 	}
 
 	// Graceful shutdown: give in-flight requests time to finish.
@@ -123,7 +123,10 @@ func (m *Master) monitorWorkers(ctx context.Context) {
 			now := time.Now()
 			for workerID, worker := range m.workers {
 				if now.Sub(worker.LastHeartbeat) > m.workerTimeout {
-					log.Printf("Worker %s timed out. Last heartbeat: %v. Evicting.", workerID, worker.LastHeartbeat)
+					slog.Warn("worker timed out, evicting",
+						"worker_id", workerID,
+						"last_heartbeat", worker.LastHeartbeat,
+					)
 					m.resetWorkerTasksLocked(workerID)
 					delete(m.workers, workerID)
 				}
@@ -150,11 +153,11 @@ func (m *Master) resetWorkerTasksLocked(workerID string) {
 	switch taskRef.Phase {
 	case gomrv1.TaskPhase_TASK_PHASE_MAP:
 		if mt, ok := job.MapTaskIndex[taskRef.TaskId]; ok {
-			resetTaskIfOwned(mt.ID, workerID, &mt.Status, &mt.WorkerID, job.ID, "Map")
+			resetTaskIfOwned(mt.ID, workerID, &mt.Status, &mt.WorkerID, job.ID, "map")
 		}
 	case gomrv1.TaskPhase_TASK_PHASE_REDUCE:
 		if rt, ok := job.ReduceTaskIndex[taskRef.TaskId]; ok {
-			resetTaskIfOwned(rt.ID, workerID, &rt.Status, &rt.WorkerID, job.ID, "Reduce")
+			resetTaskIfOwned(rt.ID, workerID, &rt.Status, &rt.WorkerID, job.ID, "reduce")
 		}
 	}
 }
@@ -162,7 +165,12 @@ func (m *Master) resetWorkerTasksLocked(workerID string) {
 // resetTaskIfOwned resets a task back to Idle if it's in-progress and owned by the given worker.
 func resetTaskIfOwned(taskID, workerID string, status *TaskStatus, ownerID *string, jobID, phase string) {
 	if *status == TaskStatusInProgress && *ownerID == workerID {
-		log.Printf("Resetting %s task %s for job %s from dead worker %s", phase, taskID, jobID, workerID)
+		slog.Info("resetting task from dead worker",
+			"phase", phase,
+			"task_id", taskID,
+			"job_id", jobID,
+			"worker_id", workerID,
+		)
 		*status = TaskStatusIdle
 		*ownerID = ""
 	}

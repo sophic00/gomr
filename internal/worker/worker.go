@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os/signal"
@@ -57,7 +57,7 @@ func (w *Worker) Run(port int) error {
 	httpServer := &http.Server{Handler: mux}
 	serverErrCh := make(chan error, 1)
 	go func() {
-		log.Printf("Worker HTTP server listening on %s (advertised as %s)", listenAddr, w.HTTPAddr)
+		slog.Info("worker HTTP server listening", "listen_addr", listenAddr, "advertised_addr", w.HTTPAddr)
 		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrCh <- err
 		}
@@ -83,7 +83,7 @@ func (w *Worker) Run(port int) error {
 	// Wait for shutdown signal or server error.
 	select {
 	case <-ctx.Done():
-		log.Printf("Worker %s received shutdown signal, draining...", w.ID)
+		slog.Info("received shutdown signal, draining...", "worker_id", w.ID)
 	case err = <-serverErrCh:
 		if err != nil {
 			return fmt.Errorf("worker HTTP server failed: %w", err)
@@ -130,7 +130,11 @@ func (w *Worker) register(client gomrv1.MasterServiceClient) (time.Duration, err
 		return 0, fmt.Errorf("worker registration rejected: %s", resp.GetMessage())
 	}
 
-	log.Printf("Registered worker %s with master; heartbeat interval=%ds timeout=%ds", w.ID, resp.GetHeartbeatIntervalSeconds(), resp.GetWorkerTimeoutSeconds())
+	slog.Info("registered with master",
+		"worker_id", w.ID,
+		"heartbeat_interval_s", resp.GetHeartbeatIntervalSeconds(),
+		"timeout_s", resp.GetWorkerTimeoutSeconds(),
+	)
 	if secs := resp.GetHeartbeatIntervalSeconds(); secs > 0 {
 		return time.Duration(secs) * time.Second, nil
 	}
@@ -164,14 +168,14 @@ func (w *Worker) heartbeatLoop(ctx context.Context, client gomrv1.MasterServiceC
 			_, err := client.Heartbeat(hbCtx, req)
 			cancel()
 			if err != nil {
-				log.Printf("Failed to send heartbeat for worker %s: %v", w.ID, err)
+				slog.Warn("heartbeat failed", "worker_id", w.ID, "error", err)
 				if strings.Contains(err.Error(), "not registered") {
-					log.Printf("Worker not registered (possibly master restarted). Attempting to re-register...")
+					slog.Info("worker not registered, attempting re-registration...", "worker_id", w.ID)
 					newInterval, regErr := w.register(client)
 					if regErr != nil {
-						log.Printf("Re-registration failed: %v", regErr)
+						slog.Error("re-registration failed", "worker_id", w.ID, "error", regErr)
 					} else {
-						log.Printf("Re-registration successful.")
+						slog.Info("re-registration successful", "worker_id", w.ID)
 						if newInterval != interval && newInterval > 0 {
 							interval = newInterval
 							ticker.Reset(interval)
@@ -180,7 +184,7 @@ func (w *Worker) heartbeatLoop(ctx context.Context, client gomrv1.MasterServiceC
 				}
 				continue
 			}
-			log.Printf("Sent heartbeat for worker %s (state: %s)", w.ID, req.State.String())
+			slog.Debug("heartbeat sent", "worker_id", w.ID, "state", req.State.String())
 		}
 	}
 }
