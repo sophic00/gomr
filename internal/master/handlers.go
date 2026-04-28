@@ -21,8 +21,12 @@ func (m *Master) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Basic validation
-	if sub.PluginURI == "" || sub.InputPrefix == "" || sub.OutputPrefix == "" || sub.ReduceTasks <= 0 {
+	if sub.MapSourceURI == "" || sub.ReduceSourceURI == "" || sub.InputPrefix == "" || sub.OutputPrefix == "" || sub.ReduceTasks <= 0 {
 		http.Error(w, "Missing required fields or invalid reduce_tasks count", http.StatusBadRequest)
+		return
+	}
+	if sub.MapCompileCmd == "" || sub.ReduceCompileCmd == "" {
+		http.Error(w, "map_compile_cmd and reduce_compile_cmd are required", http.StatusBadRequest)
 		return
 	}
 
@@ -73,30 +77,50 @@ func (m *Master) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// 3. Create the Job
-	jobID := "job-" + uuid.New().String()
-	job := &Job{
-		ID:             jobID,
-		PluginURI:      sub.PluginURI,
-		InputPrefix:    sub.InputPrefix,
-		OutputPrefix:   sub.OutputPrefix,
-		NumReduceTasks: sub.ReduceTasks,
-		Status:         JobStatusQueued,
-		MapTasks:       mapTasks,
-		ReduceTasks:    reduceTasks,
+	// 3. Build task index maps for O(1) lookup.
+	mapTaskIndex := make(map[string]*MapTask, len(mapTasks))
+	for _, mt := range mapTasks {
+		mapTaskIndex[mt.ID] = mt
+	}
+	reduceTaskIndex := make(map[string]*ReduceTask, len(reduceTasks))
+	for _, rt := range reduceTasks {
+		reduceTaskIndex[rt.ID] = rt
 	}
 
-	// 4. Register and Enqueue
+	// 4. Create the Job
+	jobID := "job-" + uuid.New().String()
+	job := &Job{
+		ID:               jobID,
+		MapSourceURI:     sub.MapSourceURI,
+		ReduceSourceURI:  sub.ReduceSourceURI,
+		MapCompileCmd:    sub.MapCompileCmd,
+		ReduceCompileCmd: sub.ReduceCompileCmd,
+		InputPrefix:      sub.InputPrefix,
+		OutputPrefix:     sub.OutputPrefix,
+		NumReduceTasks:   sub.ReduceTasks,
+		Status:           JobStatusQueued,
+		MapTasks:         mapTasks,
+		ReduceTasks:      reduceTasks,
+		MapTaskIndex:     mapTaskIndex,
+		ReduceTaskIndex:  reduceTaskIndex,
+	}
+
+	// 5. Register and Enqueue
 	m.mu.Lock()
 	m.jobs[jobID] = job
 	m.mu.Unlock()
 
-	// Push to job queue (non-blocking since it's buffered)
-	m.queue <- jobID
+	// Push to job queue; reject if queue is full.
+	select {
+	case m.queue <- jobID:
+	default:
+		http.Error(w, "Job queue is full", http.StatusServiceUnavailable)
+		return
+	}
 
 	log.Printf("Job %s submitted: %d Map tasks, %d Reduce tasks\n", jobID, len(mapTasks), sub.ReduceTasks)
 
-	// 5. Send Response
+	// 6. Send Response
 	resp := JobSubmitResponse{
 		JobID:            jobID,
 		Status:           "Accepted",
@@ -117,8 +141,8 @@ func (m *Master) handleStatus(w http.ResponseWriter, r *http.Request) {
 	defer m.mu.RUnlock()
 
 	workerStats := make(map[string]int)
-	for _, w := range m.workers {
-		stateStr := w.State.String()
+	for _, wk := range m.workers {
+		stateStr := wk.State.String()
 		workerStats[stateStr]++
 	}
 

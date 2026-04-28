@@ -7,7 +7,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,36 +21,41 @@ import (
 
 const defaultHeartbeatInterval = 5 * time.Second
 
-// Start initializes and runs the Gomr Worker on the given port,
-// connecting to the Master gRPC endpoint.
-func Start(cfg *config.Config) error {
-	w := &Worker{
+// NewWorker creates a new Worker instance from the given config.
+func NewWorker(cfg *config.Config) *Worker {
+	return &Worker{
 		ID:             uuid.NewString(),
 		MasterGRPCAddr: cfg.MasterGRPCAddr,
-		HTTPAddr:       net.JoinHostPort(cfg.WorkerHost, fmt.Sprintf("%d", cfg.WorkerPort)),
+		HTTPAddr:       net.JoinHostPort(cfg.WorkerHost, fmt.Sprintf("%d", cfg.WorkerHTTPPort)),
 		State:          gomrv1.WorkerState_WORKER_STATE_IDLE,
 	}
+}
 
-	listenAddr := fmt.Sprintf(":%d", cfg.WorkerPort)
+// Start initializes and runs the Gomr Worker, connecting to the Master gRPC endpoint.
+func Start(cfg *config.Config) error {
+	w := NewWorker(cfg)
+	return w.Run(cfg.WorkerHTTPPort)
+}
+
+// Run starts the worker's HTTP server, registers with the master, and begins the heartbeat loop.
+func (w *Worker) Run(port int) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	listenAddr := fmt.Sprintf(":%d", port)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(httpW http.ResponseWriter, r *http.Request) {
-		httpW.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(httpW, "ok")
-	})
-	// placeholder: will be used for serving intermediate result
-	mux.HandleFunc("/", func(httpW http.ResponseWriter, r *http.Request) {
-		httpW.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(httpW, "Worker HTTP Data Plane on %s\n", w.HTTPAddr)
-	})
+	mux.HandleFunc("/health", w.handleHealth)
+	// Placeholder: will serve intermediate partition data for reduce workers.
+	mux.HandleFunc("/", w.handleRoot)
 
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", listenAddr, err)
 	}
 
-	serverErrCh := make(chan error, 1)
 	httpServer := &http.Server{Handler: mux}
+	serverErrCh := make(chan error, 1)
 	go func() {
 		log.Printf("Worker HTTP server listening on %s (advertised as %s)", listenAddr, w.HTTPAddr)
 		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -59,27 +66,51 @@ func Start(cfg *config.Config) error {
 
 	conn, err := grpc.NewClient(w.MasterGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
+		_ = httpServer.Shutdown(context.Background())
 		return fmt.Errorf("failed to connect to master gRPC endpoint %s: %w", w.MasterGRPCAddr, err)
 	}
 	defer conn.Close()
 
 	client := gomrv1.NewMasterServiceClient(conn)
-	heartbeatInterval, err := registerWorker(client, w)
+	heartbeatInterval, err := w.register(client)
 	if err != nil {
 		_ = httpServer.Shutdown(context.Background())
 		return err
 	}
 
-	go startHeartbeatLoop(client, w, heartbeatInterval)
+	go w.heartbeatLoop(ctx, client, heartbeatInterval)
 
-	if err, ok := <-serverErrCh; ok && err != nil {
-		return fmt.Errorf("worker HTTP server failed: %w", err)
+	// Wait for shutdown signal or server error.
+	select {
+	case <-ctx.Done():
+		log.Printf("Worker %s received shutdown signal, draining...", w.ID)
+	case err = <-serverErrCh:
+		if err != nil {
+			return fmt.Errorf("worker HTTP server failed: %w", err)
+		}
 	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = httpServer.Shutdown(shutdownCtx)
 
 	return nil
 }
 
-func registerWorker(client gomrv1.MasterServiceClient, w *Worker) (time.Duration, error) {
+// handleHealth responds to health check probes from the master.
+func (w *Worker) handleHealth(hw http.ResponseWriter, r *http.Request) {
+	hw.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(hw, "ok")
+}
+
+// handleRoot is a placeholder data plane endpoint.
+func (w *Worker) handleRoot(hw http.ResponseWriter, r *http.Request) {
+	hw.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(hw, "Worker HTTP Data Plane on %s\n", w.HTTPAddr)
+}
+
+// register sends a RegisterWorker RPC to the master and returns the negotiated heartbeat interval.
+func (w *Worker) register(client gomrv1.MasterServiceClient) (time.Duration, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -106,7 +137,8 @@ func registerWorker(client gomrv1.MasterServiceClient, w *Worker) (time.Duration
 	return defaultHeartbeatInterval, nil
 }
 
-func startHeartbeatLoop(client gomrv1.MasterServiceClient, w *Worker, interval time.Duration) {
+// heartbeatLoop sends periodic heartbeats to the master, re-registering if necessary.
+func (w *Worker) heartbeatLoop(ctx context.Context, client gomrv1.MasterServiceClient, interval time.Duration) {
 	if interval <= 0 {
 		interval = defaultHeartbeatInterval
 	}
@@ -114,36 +146,41 @@ func startHeartbeatLoop(client gomrv1.MasterServiceClient, w *Worker, interval t
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			hbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 
-		w.mu.RLock()
-		req := &gomrv1.HeartbeatRequest{
-			WorkerId:    w.ID,
-			State:       w.State,
-			CurrentTask: w.CurrentTask,
-		}
-		w.mu.RUnlock()
+			w.mu.RLock()
+			req := &gomrv1.HeartbeatRequest{
+				WorkerId:    w.ID,
+				State:       w.State,
+				CurrentTask: w.CurrentTask,
+			}
+			w.mu.RUnlock()
 
-		_, err := client.Heartbeat(ctx, req)
-		cancel()
-		if err != nil {
-			log.Printf("Failed to send heartbeat for worker %s: %v", w.ID, err)
-			if strings.Contains(err.Error(), "not registered") {
-				log.Printf("Worker not registered (possibly master restarted). Attempting to re-register...")
-				newInterval, regErr := registerWorker(client, w)
-				if regErr != nil {
-					log.Printf("Re-registration failed: %v", regErr)
-				} else {
-					log.Printf("Re-registration successful.")
-					if newInterval != interval && newInterval > 0 {
-						interval = newInterval
-						ticker.Reset(interval)
+			_, err := client.Heartbeat(hbCtx, req)
+			cancel()
+			if err != nil {
+				log.Printf("Failed to send heartbeat for worker %s: %v", w.ID, err)
+				if strings.Contains(err.Error(), "not registered") {
+					log.Printf("Worker not registered (possibly master restarted). Attempting to re-register...")
+					newInterval, regErr := w.register(client)
+					if regErr != nil {
+						log.Printf("Re-registration failed: %v", regErr)
+					} else {
+						log.Printf("Re-registration successful.")
+						if newInterval != interval && newInterval > 0 {
+							interval = newInterval
+							ticker.Reset(interval)
+						}
 					}
 				}
+				continue
 			}
-			continue
+			log.Printf("Sent heartbeat for worker %s (state: %s)", w.ID, req.State.String())
 		}
-		log.Printf("Sent heartbeat for worker %s (state: %s)", w.ID, req.State.String())
 	}
 }

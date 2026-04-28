@@ -1,6 +1,7 @@
 package master
 
 import (
+	"net/http"
 	"sync"
 	"time"
 
@@ -10,10 +11,13 @@ import (
 
 // JobSubmission represents the expected JSON payload for POST /submit
 type JobSubmission struct {
-	PluginURI    string `json:"plugin_uri"`
-	InputPrefix  string `json:"input_prefix"`
-	OutputPrefix string `json:"output_prefix"`
-	ReduceTasks  int    `json:"reduce_tasks"`
+	MapSourceURI     string `json:"map_source_uri"`
+	ReduceSourceURI  string `json:"reduce_source_uri"`
+	MapCompileCmd    string `json:"map_compile_cmd"`
+	ReduceCompileCmd string `json:"reduce_compile_cmd"`
+	InputPrefix      string `json:"input_prefix"`
+	OutputPrefix     string `json:"output_prefix"`
+	ReduceTasks      int    `json:"reduce_tasks"`
 }
 
 type TaskStatus string
@@ -70,21 +74,28 @@ type Master struct {
 	queue   chan string
 
 	s3Client          *minio.Client
+	httpClient        *http.Client
 	heartbeatInterval time.Duration
 	workerTimeout     time.Duration
 }
 
 type Job struct {
-	ID             string
-	PluginURI      string
-	InputPrefix    string
-	OutputPrefix   string
-	NumReduceTasks int
+	ID           string
+	InputPrefix  string
+	OutputPrefix string
+
+	MapSourceURI    string
+	ReduceSourceURI string
+	MapCompileCmd   string
+	ReduceCompileCmd string
+	NumReduceTasks  int
 
 	Status JobStatus
 
-	MapTasks    []*MapTask
-	ReduceTasks []*ReduceTask
+	MapTasks         []*MapTask
+	ReduceTasks      []*ReduceTask
+	MapTaskIndex     map[string]*MapTask
+	ReduceTaskIndex  map[string]*ReduceTask
 }
 
 type JobSubmitResponse struct {

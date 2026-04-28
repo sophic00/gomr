@@ -9,6 +9,8 @@ import (
 	"time"
 
 	gomrv1 "github.com/sophic00/gomr/proto/gomr/v1"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 type controlServer struct {
@@ -38,7 +40,7 @@ func (s *controlServer) RegisterWorker(ctx context.Context, req *gomrv1.Register
 
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := probeWorkerHTTP(probeCtx, req.GetHttpAddr()); err != nil {
+	if err := probeWorkerHTTP(probeCtx, s.master.httpClient, req.GetHttpAddr()); err != nil {
 		return &gomrv1.RegisterWorkerResponse{
 			Accepted: false,
 			Message:  fmt.Sprintf("worker health probe failed: %v", err),
@@ -69,7 +71,7 @@ func (s *controlServer) RegisterWorker(ctx context.Context, req *gomrv1.Register
 
 func (s *controlServer) Heartbeat(ctx context.Context, req *gomrv1.HeartbeatRequest) (*gomrv1.HeartbeatResponse, error) {
 	if req.GetWorkerId() == "" {
-		return nil, fmt.Errorf("worker_id is required")
+		return nil, grpcstatus.Error(codes.InvalidArgument, "worker_id is required")
 	}
 
 	s.master.mu.Lock()
@@ -77,7 +79,7 @@ func (s *controlServer) Heartbeat(ctx context.Context, req *gomrv1.HeartbeatRequ
 
 	worker, ok := s.master.workers[req.GetWorkerId()]
 	if !ok {
-		return nil, fmt.Errorf("worker %s is not registered", req.GetWorkerId())
+		return nil, grpcstatus.Errorf(codes.NotFound, "worker %s is not registered", req.GetWorkerId())
 	}
 
 	worker.State = req.GetState()
@@ -87,7 +89,7 @@ func (s *controlServer) Heartbeat(ctx context.Context, req *gomrv1.HeartbeatRequ
 	return &gomrv1.HeartbeatResponse{}, nil
 }
 
-func probeWorkerHTTP(ctx context.Context, httpAddr string) error {
+func probeWorkerHTTP(ctx context.Context, client *http.Client, httpAddr string) error {
 	probeURL := httpAddr
 	if !strings.HasPrefix(probeURL, "http://") && !strings.HasPrefix(probeURL, "https://") {
 		probeURL = "http://" + probeURL
@@ -99,7 +101,6 @@ func probeWorkerHTTP(ctx context.Context, httpAddr string) error {
 		return err
 	}
 
-	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

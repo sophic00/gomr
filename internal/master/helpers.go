@@ -23,28 +23,33 @@ func parseS3URI(uri string) (bucket, prefix string, err error) {
 	return bucket, prefix, nil
 }
 
-// deleteS3Prefix deletes all objects under a given S3 URI prefix.
+// deleteS3Prefix deletes all objects under a given S3 URI prefix using batch removal.
 func deleteS3Prefix(ctx context.Context, client *minio.Client, uri string) error {
 	bucket, prefix, err := parseS3URI(uri)
 	if err != nil {
 		return err
 	}
 
-	opts := minio.ListObjectsOptions{
+	objectsCh := client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
 		Prefix:    prefix,
 		Recursive: true,
-	}
+	})
 
-	// List objects and delete them one by one
-	objectsCh := client.ListObjects(ctx, bucket, opts)
-	for object := range objectsCh {
-		if object.Err != nil {
-			return object.Err
+	// RemoveObjects accepts a channel of ObjectInfo and deletes in batches.
+	removeObjCh := make(chan minio.ObjectInfo)
+	go func() {
+		defer close(removeObjCh)
+		for obj := range objectsCh {
+			if obj.Err != nil {
+				// Log but continue; errors will surface via the error channel below.
+				continue
+			}
+			removeObjCh <- obj
 		}
-		err = client.RemoveObject(ctx, bucket, object.Key, minio.RemoveObjectOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to delete %s: %v", object.Key, err)
-		}
+	}()
+
+	for err := range client.RemoveObjects(ctx, bucket, removeObjCh, minio.RemoveObjectsOptions{}) {
+		return fmt.Errorf("failed to delete %s: %v", err.ObjectName, err.Err)
 	}
 	return nil
 }

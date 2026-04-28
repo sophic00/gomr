@@ -58,31 +58,16 @@ run-worker: build
 	@echo "Starting Worker node..."
 	./$(BIN_DIR)/$(APP_NAME) worker
 
-# Plugin configuration
-PLUGIN_NAME ?= wordcount
-PLUGIN_PATH ?= ./plugin/$(PLUGIN_NAME)
-
-# Build the plugin
-build-plugin:
-	@echo "Building $(PLUGIN_NAME) plugin from $(PLUGIN_PATH)..."
-	@mkdir -p $(BIN_DIR)/plugins
-	go build -buildmode=plugin -o $(BIN_DIR)/plugins/$(PLUGIN_NAME).so $(PLUGIN_PATH)
-
-# Upload plugin to S3
-upload-plugin: build-plugin
-	@echo "Uploading $(PLUGIN_NAME) plugin to S3..."
-	aws --endpoint-url http://thia:3900 s3 cp $(BIN_DIR)/plugins/$(PLUGIN_NAME).so s3://thia/plugins/$(PLUGIN_NAME).so
-
-# Upload plugin data to S3
+# Upload example data to S3
 upload-data:
-	@echo "Uploading $(PLUGIN_NAME) data to S3..."
-	aws --endpoint-url http://thia:3900 s3 sync $(PLUGIN_PATH)/data/ s3://thia/data/$(PLUGIN_NAME)/
+	@echo "Uploading example data to S3..."
+	aws --endpoint-url http://thia:3900 s3 sync examples/wordcount/data/ s3://thia/data/wordcount/
 
-# Clean plugin and data from S3
+# Clean data and output from S3
 clean-s3:
-	@echo "Cleaning $(PLUGIN_NAME) from S3..."
-	aws --endpoint-url http://thia:3900 s3 rm s3://thia/plugins/$(PLUGIN_NAME).so || true
-	aws --endpoint-url http://thia:3900 s3 rm s3://thia/data/$(PLUGIN_NAME)/ --recursive || true
+	@echo "Cleaning S3..."
+	aws --endpoint-url http://thia:3900 s3 rm s3://thia/data/ --recursive || true
+	aws --endpoint-url http://thia:3900 s3 rm s3://thia/output/ --recursive || true
 
 # List files in S3
 ls:

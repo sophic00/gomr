@@ -27,7 +27,7 @@ func main() {
 		}
 
 	case "worker":
-		log.Printf("Starting Gomr Worker on %s:%d, connecting to Master gRPC at %s...", cfg.WorkerHost, cfg.WorkerPort, cfg.MasterGRPCAddr)
+		log.Printf("Starting Gomr Worker on %s:%d, connecting to Master gRPC at %s...", cfg.WorkerHost, cfg.WorkerHTTPPort, cfg.MasterGRPCAddr)
 		if err := worker.Start(cfg); err != nil {
 			log.Fatalf("Worker failed: %v", err)
 		}

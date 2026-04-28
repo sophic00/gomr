@@ -75,17 +75,19 @@ message MapAssignment {
   string job_id = 1;
   string task_id = 2;
   string input_uri = 3;
-  string plugin_uri = 4;
-  uint32 reduce_partitions = 5;
+  string map_source_uri = 4;
+  string map_compile_cmd = 5;
+  uint32 reduce_partitions = 6;
 }
 
 message ReduceAssignment {
   string job_id = 1;
   string task_id = 2;
   uint32 partition = 3;
-  string plugin_uri = 4;
-  repeated string input_urls = 5;
-  string output_prefix = 6;
+  string reduce_source_uri = 4;
+  string reduce_compile_cmd = 5;
+  repeated string input_urls = 6;
+  string output_prefix = 7;
 }
 
 message PromotionAssignment {

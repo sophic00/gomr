@@ -1,10 +1,13 @@
 package master
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -36,6 +39,7 @@ func NewMaster(cfg *config.Config) (*Master, error) {
 		workers:           make(map[string]*Worker),
 		queue:             make(chan string, 1000),
 		s3Client:          minioClient,
+		httpClient:        &http.Client{Timeout: 5 * time.Second},
 		heartbeatInterval: 5 * time.Second,
 		workerTimeout:     15 * time.Second,
 	}, nil
@@ -51,6 +55,9 @@ func Start(cfg *config.Config) error {
 }
 
 func (m *Master) Run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	httpAddr := fmt.Sprintf(":%d", m.httpPort)
 	grpcAddr := fmt.Sprintf(":%d", m.grpcPort)
 
@@ -82,31 +89,47 @@ func (m *Master) Run() error {
 		errCh <- grpcServer.Serve(grpcListener)
 	}()
 
-	go m.monitorWorkers()
+	go m.monitorWorkers(ctx)
 
-	err = <-errCh
-	grpcServer.Stop()
-	_ = httpServer.Close()
+	// Wait for shutdown signal or server error.
+	select {
+	case <-ctx.Done():
+		log.Printf("Received shutdown signal, draining...")
+	case err = <-errCh:
+		log.Printf("Server error: %v", err)
+	}
+
+	// Graceful shutdown: give in-flight requests time to finish.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	grpcServer.GracefulStop()
+	_ = httpServer.Shutdown(shutdownCtx)
 
 	return err
 }
 
 // monitorWorkers runs in the background and evicts workers that haven't sent a heartbeat within the timeout.
-func (m *Master) monitorWorkers() {
+func (m *Master) monitorWorkers(ctx context.Context) {
 	ticker := time.NewTicker(m.workerTimeout / 2)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		m.mu.Lock()
-		now := time.Now()
-		for workerID, worker := range m.workers {
-			if now.Sub(worker.LastHeartbeat) > m.workerTimeout {
-				log.Printf("Worker %s timed out. Last heartbeat: %v. Evicting.", workerID, worker.LastHeartbeat)
-				m.resetWorkerTasksLocked(workerID)
-				delete(m.workers, workerID)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.mu.Lock()
+			now := time.Now()
+			for workerID, worker := range m.workers {
+				if now.Sub(worker.LastHeartbeat) > m.workerTimeout {
+					log.Printf("Worker %s timed out. Last heartbeat: %v. Evicting.", workerID, worker.LastHeartbeat)
+					m.resetWorkerTasksLocked(workerID)
+					delete(m.workers, workerID)
+				}
 			}
+			m.mu.Unlock()
 		}
-		m.mu.Unlock()
 	}
 }
 
@@ -124,27 +147,23 @@ func (m *Master) resetWorkerTasksLocked(workerID string) {
 		return
 	}
 
-	if taskRef.Phase == gomrv1.TaskPhase_TASK_PHASE_MAP {
-		for _, mt := range job.MapTasks {
-			if mt.ID == taskRef.TaskId {
-				if mt.Status == TaskStatusInProgress && mt.WorkerID == workerID {
-					log.Printf("Resetting Map task %s for job %s from dead worker %s", mt.ID, job.ID, workerID)
-					mt.Status = TaskStatusIdle
-					mt.WorkerID = ""
-				}
-				break
-			}
+	switch taskRef.Phase {
+	case gomrv1.TaskPhase_TASK_PHASE_MAP:
+		if mt, ok := job.MapTaskIndex[taskRef.TaskId]; ok {
+			resetTaskIfOwned(mt.ID, workerID, &mt.Status, &mt.WorkerID, job.ID, "Map")
 		}
-	} else if taskRef.Phase == gomrv1.TaskPhase_TASK_PHASE_REDUCE {
-		for _, rt := range job.ReduceTasks {
-			if rt.ID == taskRef.TaskId {
-				if rt.Status == TaskStatusInProgress && rt.WorkerID == workerID {
-					log.Printf("Resetting Reduce task %s for job %s from dead worker %s", rt.ID, job.ID, workerID)
-					rt.Status = TaskStatusIdle
-					rt.WorkerID = ""
-				}
-				break
-			}
+	case gomrv1.TaskPhase_TASK_PHASE_REDUCE:
+		if rt, ok := job.ReduceTaskIndex[taskRef.TaskId]; ok {
+			resetTaskIfOwned(rt.ID, workerID, &rt.Status, &rt.WorkerID, job.ID, "Reduce")
 		}
+	}
+}
+
+// resetTaskIfOwned resets a task back to Idle if it's in-progress and owned by the given worker.
+func resetTaskIfOwned(taskID, workerID string, status *TaskStatus, ownerID *string, jobID, phase string) {
+	if *status == TaskStatusInProgress && *ownerID == workerID {
+		log.Printf("Resetting %s task %s for job %s from dead worker %s", phase, taskID, jobID, workerID)
+		*status = TaskStatusIdle
+		*ownerID = ""
 	}
 }

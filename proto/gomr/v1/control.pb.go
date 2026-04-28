@@ -520,8 +520,9 @@ type MapAssignment struct {
 	JobId            string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	TaskId           string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
 	InputUri         string                 `protobuf:"bytes,3,opt,name=input_uri,json=inputUri,proto3" json:"input_uri,omitempty"`
-	PluginUri        string                 `protobuf:"bytes,4,opt,name=plugin_uri,json=pluginUri,proto3" json:"plugin_uri,omitempty"`
-	ReducePartitions uint32                 `protobuf:"varint,5,opt,name=reduce_partitions,json=reducePartitions,proto3" json:"reduce_partitions,omitempty"`
+	MapSourceUri     string                 `protobuf:"bytes,4,opt,name=map_source_uri,json=mapSourceUri,proto3" json:"map_source_uri,omitempty"`
+	MapCompileCmd    string                 `protobuf:"bytes,5,opt,name=map_compile_cmd,json=mapCompileCmd,proto3" json:"map_compile_cmd,omitempty"`
+	ReducePartitions uint32                 `protobuf:"varint,6,opt,name=reduce_partitions,json=reducePartitions,proto3" json:"reduce_partitions,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -577,9 +578,16 @@ func (x *MapAssignment) GetInputUri() string {
 	return ""
 }
 
-func (x *MapAssignment) GetPluginUri() string {
+func (x *MapAssignment) GetMapSourceUri() string {
 	if x != nil {
-		return x.PluginUri
+		return x.MapSourceUri
+	}
+	return ""
+}
+
+func (x *MapAssignment) GetMapCompileCmd() string {
+	if x != nil {
+		return x.MapCompileCmd
 	}
 	return ""
 }
@@ -592,15 +600,16 @@ func (x *MapAssignment) GetReducePartitions() uint32 {
 }
 
 type ReduceAssignment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
-	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Partition     uint32                 `protobuf:"varint,3,opt,name=partition,proto3" json:"partition,omitempty"`
-	PluginUri     string                 `protobuf:"bytes,4,opt,name=plugin_uri,json=pluginUri,proto3" json:"plugin_uri,omitempty"`
-	InputUrls     []string               `protobuf:"bytes,5,rep,name=input_urls,json=inputUrls,proto3" json:"input_urls,omitempty"`
-	OutputPrefix  string                 `protobuf:"bytes,6,opt,name=output_prefix,json=outputPrefix,proto3" json:"output_prefix,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	JobId            string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	TaskId           string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Partition        uint32                 `protobuf:"varint,3,opt,name=partition,proto3" json:"partition,omitempty"`
+	ReduceSourceUri  string                 `protobuf:"bytes,4,opt,name=reduce_source_uri,json=reduceSourceUri,proto3" json:"reduce_source_uri,omitempty"`
+	ReduceCompileCmd string                 `protobuf:"bytes,5,opt,name=reduce_compile_cmd,json=reduceCompileCmd,proto3" json:"reduce_compile_cmd,omitempty"`
+	InputUrls        []string               `protobuf:"bytes,6,rep,name=input_urls,json=inputUrls,proto3" json:"input_urls,omitempty"`
+	OutputPrefix     string                 `protobuf:"bytes,7,opt,name=output_prefix,json=outputPrefix,proto3" json:"output_prefix,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ReduceAssignment) Reset() {
@@ -654,9 +663,16 @@ func (x *ReduceAssignment) GetPartition() uint32 {
 	return 0
 }
 
-func (x *ReduceAssignment) GetPluginUri() string {
+func (x *ReduceAssignment) GetReduceSourceUri() string {
 	if x != nil {
-		return x.PluginUri
+		return x.ReduceSourceUri
+	}
+	return ""
+}
+
+func (x *ReduceAssignment) GetReduceCompileCmd() string {
+	if x != nil {
+		return x.ReduceCompileCmd
 	}
 	return ""
 }
@@ -933,23 +949,23 @@ const file_proto_gomr_v1_control_proto_rawDesc = "" +
 	"\x05state\x18\x02 \x01(\x0e2\x14.gomr.v1.WorkerStateR\x05state\x123\n" +
 	"\fcurrent_task\x18\x03 \x01(\v2\x10.gomr.v1.TaskRefR\vcurrentTask\x124\n" +
 	"\vlast_result\x18\x04 \x01(\v2\x13.gomr.v1.TaskResultR\n" +
-	"lastResult\"\xa8\x01\n" +
+	"lastResult\"\xd7\x01\n" +
 	"\rMapAssignment\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1b\n" +
-	"\tinput_uri\x18\x03 \x01(\tR\binputUri\x12\x1d\n" +
-	"\n" +
-	"plugin_uri\x18\x04 \x01(\tR\tpluginUri\x12+\n" +
-	"\x11reduce_partitions\x18\x05 \x01(\rR\x10reducePartitions\"\xc3\x01\n" +
+	"\tinput_uri\x18\x03 \x01(\tR\binputUri\x12$\n" +
+	"\x0emap_source_uri\x18\x04 \x01(\tR\fmapSourceUri\x12&\n" +
+	"\x0fmap_compile_cmd\x18\x05 \x01(\tR\rmapCompileCmd\x12+\n" +
+	"\x11reduce_partitions\x18\x06 \x01(\rR\x10reducePartitions\"\xfe\x01\n" +
 	"\x10ReduceAssignment\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1c\n" +
-	"\tpartition\x18\x03 \x01(\rR\tpartition\x12\x1d\n" +
+	"\tpartition\x18\x03 \x01(\rR\tpartition\x12*\n" +
+	"\x11reduce_source_uri\x18\x04 \x01(\tR\x0freduceSourceUri\x12,\n" +
+	"\x12reduce_compile_cmd\x18\x05 \x01(\tR\x10reduceCompileCmd\x12\x1d\n" +
 	"\n" +
-	"plugin_uri\x18\x04 \x01(\tR\tpluginUri\x12\x1d\n" +
-	"\n" +
-	"input_urls\x18\x05 \x03(\tR\tinputUrls\x12#\n" +
-	"\routput_prefix\x18\x06 \x01(\tR\foutputPrefix\"\xa8\x01\n" +
+	"input_urls\x18\x06 \x03(\tR\tinputUrls\x12#\n" +
+	"\routput_prefix\x18\a \x01(\tR\foutputPrefix\"\xa8\x01\n" +
 	"\x13PromotionAssignment\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1d\n" +

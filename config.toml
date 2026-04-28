@@ -1,5 +1,5 @@
-# Gomr Configuration Example
-# Copy this file to config.toml and configure it for your local or production setup.
+# Gomr Configuration
+# All configuration is done via this TOML file.
 
 # Master Node Configuration
 master_http_port = 8080
@@ -8,9 +8,15 @@ master_grpc_port = 9090
 # Worker Node Configuration
 master_grpc_addr = "localhost:9090"
 worker_host = "localhost"
-worker_port = 8081
+worker_http_port = 8081
+worker_heartbeat_interval = "5s"
 
-# Storage Configuration (S3 / MinIO)
+# Intermediate Storage
+# Partitions below this threshold (in MB) are kept in memory.
+# Above it, they spill to disk. Set to 0 for always in-memory.
+intermediate_spill_threshold_mb = 256
+
+# Storage Configuration (S3 / MinIO / Garage)
 s3_endpoint = "thia:3900"
 aws_access_key_id = "GK065ea61db3bb0d603a6ce9b1"
 aws_secret_access_key = "2f991f669f34cfb64b01a58b9f92a06e1f539c08a203e5c2a373ff0b5f1a8c95"
