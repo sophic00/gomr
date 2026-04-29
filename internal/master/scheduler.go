@@ -40,6 +40,10 @@ func (m *Master) assignTask(workerID string) *gomrv1.Assignment {
 		}
 		return m.assignReduceTask(job, workerID)
 	default:
+		// Active job is completed, aborted, or failed.
+		// It should have been cleared elsewhere, but clear it here to be safe
+		// so the next job can start.
+		m.activeJobID = ""
 		return nil
 	}
 }
