@@ -137,27 +137,71 @@ func (w *Worker) executeReduce(ctx context.Context, a *gomrv1.ReduceAssignment) 
 		return result
 	}
 
-	// 2. Download all partition files from map workers.
-	slog.Info("downloading partitions for reduce",
+	// Drain any stale updates.
+	for {
+		select {
+		case <-w.reduceUpdates:
+		default:
+			goto Drained
+		}
+	}
+Drained:
+
+	// 2. Download partition files incrementally (Early Reduce Prefetch).
+	slog.Info("gathering partitions for reduce",
 		"job_id", a.JobId,
 		"task_id", a.TaskId,
 		"partition", a.Partition,
-		"sources", len(a.InputUrls),
 	)
 
 	var allLines [][]byte
 	httpClient := &http.Client{Timeout: 60 * time.Second}
-	for _, inputURL := range a.InputUrls {
-		lines, err := downloadPartition(ctx, httpClient, inputURL)
-		if err != nil {
-			result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
-			result.ErrorMessage = fmt.Sprintf("failed to download partition from %s: %v", inputURL, err)
-			slog.Error("partition download failed", "url", inputURL, "error", err)
-			return result
-		}
-		allLines = append(allLines, lines...)
-	}
 
+	downloadedURLs := make(map[string]bool)
+	pendingURLs := make(map[string]bool)
+	for _, u := range a.InputUrls {
+		pendingURLs[u] = true
+	}
+	allMapsComplete := a.AllMapsComplete
+
+	for {
+		// Download any pending URLs
+		for u := range pendingURLs {
+			lines, err := downloadPartition(ctx, httpClient, u)
+			if err != nil {
+				result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+				result.ErrorMessage = fmt.Sprintf("failed to download partition from %s: %v", u, err)
+				slog.Error("partition download failed", "url", u, "error", err)
+				return result
+			}
+			allLines = append(allLines, lines...)
+			downloadedURLs[u] = true
+			delete(pendingURLs, u)
+		}
+
+		if allMapsComplete && len(pendingURLs) == 0 {
+			break
+		}
+
+		// Wait for updates or tick
+		select {
+		case <-ctx.Done():
+			result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+			result.ErrorMessage = "context canceled"
+			return result
+		case update := <-w.reduceUpdates:
+			if update.AllMapsComplete {
+				allMapsComplete = true
+			}
+			for _, u := range update.AdditionalReduceUrls {
+				if !downloadedURLs[u] {
+					pendingURLs[u] = true
+				}
+			}
+		case <-time.After(1 * time.Second):
+			// Keep polling periodically, though channel should wake us
+		}
+	}
 	// 3. Sort all lines by key (everything before the first tab).
 	sort.Slice(allLines, func(i, j int) bool {
 		keyI := extractKey(allLines[i])

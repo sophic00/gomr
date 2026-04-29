@@ -55,6 +55,7 @@ func NewWorker(cfg *config.Config) (*Worker, error) {
 		s3Client:       s3Client,
 		workDir:        workDir,
 		spillThreshold: cfg.IntermediateSpillThreshold * 1024 * 1024, // MB → bytes
+		reduceUpdates:  make(chan *gomrv1.HeartbeatResponse, 5),
 	}, nil
 }
 
@@ -240,6 +241,15 @@ func (w *Worker) heartbeatLoop(ctx context.Context, client gomrv1.MasterServiceC
 			// Handle new assignment (only if we're idle).
 			if assignment := resp.GetAssignment(); assignment != nil {
 				go w.handleAssignment(ctx, assignment)
+			}
+
+			// Handle early reduce prefetch updates.
+			if len(resp.GetAdditionalReduceUrls()) > 0 || resp.GetAllMapsComplete() {
+				select {
+				case w.reduceUpdates <- resp:
+				default:
+					slog.Debug("reduceUpdates channel full or no listener, dropping update", "worker_id", w.ID)
+				}
 			}
 
 			slog.Debug("heartbeat sent", "worker_id", w.ID, "state", req.State.String())
