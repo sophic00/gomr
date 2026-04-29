@@ -88,6 +88,7 @@ message ReduceAssignment {
   string reduce_compile_cmd = 5;
   repeated string input_urls = 6;
   string output_prefix = 7;
+  bool all_maps_complete = 8;
 }
 
 message PromotionAssignment {
@@ -109,4 +110,6 @@ message Assignment {
 message HeartbeatResponse {
   bool should_abort_current_task = 1;
   Assignment assignment = 2;
+  repeated string additional_reduce_urls = 3;
+  bool all_maps_complete = 4;
 }

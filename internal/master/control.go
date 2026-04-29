@@ -104,8 +104,19 @@ func (s *controlServer) Heartbeat(ctx context.Context, req *gomrv1.HeartbeatRequ
 
 	// 3. If worker is busy on an aborted job, tell it to stop.
 	if task := req.GetCurrentTask(); task != nil {
-		if job, exists := s.master.jobs[task.JobId]; exists && job.Status == JobStatusAborted {
-			resp.ShouldAbortCurrentTask = true
+		if job, exists := s.master.jobs[task.JobId]; exists {
+			if job.Status == JobStatusAborted {
+				resp.ShouldAbortCurrentTask = true
+			}
+
+			// 4. Early Reduce Prefetch updates.
+			if task.Phase == gomrv1.TaskPhase_TASK_PHASE_REDUCE {
+				rt, ok := job.ReduceTaskIndex[task.TaskId]
+				if ok {
+					resp.AdditionalReduceUrls = s.master.collectPartitionURLs(job, rt.Partition)
+					resp.AllMapsComplete = (job.Status == JobStatusReducing)
+				}
+			}
 		}
 	}
 

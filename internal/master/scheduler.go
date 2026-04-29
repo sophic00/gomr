@@ -3,6 +3,7 @@ package master
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,7 +25,14 @@ func (m *Master) assignTask(workerID string) *gomrv1.Assignment {
 
 	switch job.Status {
 	case JobStatusMapping:
-		return m.assignMapTask(job, workerID)
+		if a := m.assignMapTask(job, workerID); a != nil {
+			return a
+		}
+		// If no map task could be assigned, check if we can assign a reduce task early
+		if m.anyMapTaskCompleted(job) {
+			return m.assignReduceTask(job, workerID)
+		}
+		return nil
 	case JobStatusReducing:
 		// First check for pending promotions (completed reduce tasks with temp objects).
 		if a := m.assignPromotionTask(job, workerID); a != nil {
@@ -73,7 +81,52 @@ func (m *Master) assignMapTask(job *Job, workerID string) *gomrv1.Assignment {
 		}
 	}
 
-	// No idle map tasks. Check if all maps are done to advance phase.
+	// No idle map tasks. Check for speculation.
+	if len(job.MapCompletionTimes) >= 2 {
+		median := medianDuration(job.MapCompletionTimes)
+		threshold := time.Duration(float64(median) * 1.5)
+		if threshold < 5*time.Second {
+			threshold = 5 * time.Second
+		}
+
+		for _, mt := range job.MapTasks {
+			if mt.Status != TaskStatusInProgress || len(mt.Attempts) >= 2 {
+				continue
+			}
+
+			if elapsedSince(mt.Attempts[0].StartedAt) > threshold {
+				attemptID := uuid.NewString()
+				mt.Attempts = append(mt.Attempts, &TaskAttempt{
+					AttemptID: attemptID,
+					WorkerID:  workerID,
+					StartedAt: time.Now(),
+				})
+
+				slog.Info("speculatively assigning map task",
+					"job_id", job.ID,
+					"task_id", mt.ID,
+					"attempt_id", attemptID,
+					"worker_id", workerID,
+					"median_duration", median,
+				)
+
+				return &gomrv1.Assignment{
+					Kind: &gomrv1.Assignment_Map{
+						Map: &gomrv1.MapAssignment{
+							JobId:            job.ID,
+							TaskId:           mt.ID,
+							InputUri:         mt.InputURI,
+							MapSourceUri:     job.MapSourceURI,
+							MapCompileCmd:    job.MapCompileCmd,
+							ReducePartitions: uint32(job.NumReduceTasks),
+						},
+					},
+				}
+			}
+		}
+	}
+
+	// No speculation possible. Check if all maps are done to advance phase.
 	m.advanceJob(job)
 	// After advancing, we might now be in reduce phase. Try to assign.
 	if job.Status == JobStatusReducing {
@@ -120,12 +173,63 @@ func (m *Master) assignReduceTask(job *Job, workerID string) *gomrv1.Assignment 
 					ReduceCompileCmd: job.ReduceCompileCmd,
 					InputUrls:        inputURLs,
 					OutputPrefix:     job.OutputPrefix,
+					AllMapsComplete:  job.Status == JobStatusReducing,
 				},
 			},
 		}
 	}
 
-	// No idle reduce tasks — check if all done.
+	// No idle reduce tasks. Check for speculation.
+	if len(job.ReduceCompletionTimes) >= 2 {
+		median := medianDuration(job.ReduceCompletionTimes)
+		threshold := time.Duration(float64(median) * 1.5)
+		if threshold < 5*time.Second {
+			threshold = 5 * time.Second
+		}
+
+		for _, rt := range job.ReduceTasks {
+			if rt.Status != TaskStatusInProgress || len(rt.Attempts) >= 2 {
+				continue
+			}
+
+			if elapsedSince(rt.Attempts[0].StartedAt) > threshold {
+				attemptID := uuid.NewString()
+				rt.Attempts = append(rt.Attempts, &TaskAttempt{
+					AttemptID: attemptID,
+					WorkerID:  workerID,
+					StartedAt: time.Now(),
+				})
+
+				inputURLs := m.collectPartitionURLs(job, rt.Partition)
+
+				slog.Info("speculatively assigning reduce task",
+					"job_id", job.ID,
+					"task_id", rt.ID,
+					"attempt_id", attemptID,
+					"worker_id", workerID,
+					"partition", rt.Partition,
+					"median_duration", median,
+				)
+
+				return &gomrv1.Assignment{
+					Kind: &gomrv1.Assignment_Reduce{
+						Reduce: &gomrv1.ReduceAssignment{
+							JobId:            job.ID,
+							TaskId:           rt.ID,
+							Partition:        uint32(rt.Partition),
+							ReduceSourceUri:  job.ReduceSourceURI,
+							ReduceCompileCmd: job.ReduceCompileCmd,
+							InputUrls:        inputURLs,
+							OutputPrefix:     job.OutputPrefix,
+							AllMapsComplete:  job.Status == JobStatusReducing,
+						},
+					},
+				}
+			}
+		}
+	}
+
+	// No speculation possible. Check if all done.
 	m.advanceJob(job)
 	return nil
 }
@@ -166,6 +270,15 @@ func (m *Master) assignPromotionTask(job *Job, workerID string) *gomrv1.Assignme
 		}
 	}
 	return nil
+}
+
+func (m *Master) anyMapTaskCompleted(job *Job) bool {
+	for _, mt := range job.MapTasks {
+		if mt.Status == TaskStatusCompleted {
+			return true
+		}
+	}
+	return false
 }
 
 // collectPartitionURLs gathers the partition URL at index `partition` from every
@@ -237,13 +350,17 @@ func (m *Master) processMapResult(job *Job, ref *gomrv1.TaskRef, result *gomrv1.
 		m.advanceJob(job)
 
 	case gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED:
-		slog.Warn("map task failed, resetting to idle",
+		slog.Warn("map task failed",
 			"job_id", job.ID,
 			"task_id", mt.ID,
 			"worker_id", workerID,
 			"error", result.ErrorMessage,
 		)
-		mt.Status = TaskStatusIdle // Will be retried.
+		mt.Attempts = removeAttempt(mt.Attempts, ref.AttemptId)
+		if len(mt.Attempts) == 0 {
+			slog.Info("no active attempts left, resetting map task to idle", "task_id", mt.ID)
+			mt.Status = TaskStatusIdle
+		}
 
 	case gomrv1.TaskResultState_TASK_RESULT_STATE_ABORTED:
 		// No-op: task was already reset by eviction or abort.
@@ -282,13 +399,17 @@ func (m *Master) processReduceResult(job *Job, ref *gomrv1.TaskRef, result *gomr
 		m.advanceJob(job)
 
 	case gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED:
-		slog.Warn("reduce task failed, resetting to idle",
+		slog.Warn("reduce task failed",
 			"job_id", job.ID,
 			"task_id", rt.ID,
 			"worker_id", workerID,
 			"error", result.ErrorMessage,
 		)
-		rt.Status = TaskStatusIdle
+		rt.Attempts = removeAttempt(rt.Attempts, ref.AttemptId)
+		if len(rt.Attempts) == 0 {
+			slog.Info("no active attempts left, resetting reduce task to idle", "task_id", rt.ID)
+			rt.Status = TaskStatusIdle
+		}
 
 	case gomrv1.TaskResultState_TASK_RESULT_STATE_ABORTED:
 		// No-op.
@@ -419,4 +540,28 @@ func elapsedSince(t time.Time) time.Duration {
 // a specific partition from a map worker.
 func formatPartitionURL(workerHTTPAddr, jobID, taskID string, partition int) string {
 	return fmt.Sprintf("http://%s/partitions/%s/%s/%d", workerHTTPAddr, jobID, taskID, partition)
+}
+
+func medianDuration(durations []time.Duration) time.Duration {
+	if len(durations) == 0 {
+		return 0
+	}
+	sorted := make([]time.Duration, len(durations))
+	copy(sorted, durations)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 0 {
+		return (sorted[mid-1] + sorted[mid]) / 2
+	}
+	return sorted[mid]
+}
+
+func removeAttempt(attempts []*TaskAttempt, attemptID string) []*TaskAttempt {
+	var kept []*TaskAttempt
+	for _, a := range attempts {
+		if a.AttemptID != attemptID {
+			kept = append(kept, a)
+		}
+	}
+	return kept
 }

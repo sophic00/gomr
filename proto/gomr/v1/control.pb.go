@@ -608,6 +608,7 @@ type ReduceAssignment struct {
 	ReduceCompileCmd string                 `protobuf:"bytes,5,opt,name=reduce_compile_cmd,json=reduceCompileCmd,proto3" json:"reduce_compile_cmd,omitempty"`
 	InputUrls        []string               `protobuf:"bytes,6,rep,name=input_urls,json=inputUrls,proto3" json:"input_urls,omitempty"`
 	OutputPrefix     string                 `protobuf:"bytes,7,opt,name=output_prefix,json=outputPrefix,proto3" json:"output_prefix,omitempty"`
+	AllMapsComplete  bool                   `protobuf:"varint,8,opt,name=all_maps_complete,json=allMapsComplete,proto3" json:"all_maps_complete,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -689,6 +690,13 @@ func (x *ReduceAssignment) GetOutputPrefix() string {
 		return x.OutputPrefix
 	}
 	return ""
+}
+
+func (x *ReduceAssignment) GetAllMapsComplete() bool {
+	if x != nil {
+		return x.AllMapsComplete
+	}
+	return false
 }
 
 type PromotionAssignment struct {
@@ -869,6 +877,8 @@ type HeartbeatResponse struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	ShouldAbortCurrentTask bool                   `protobuf:"varint,1,opt,name=should_abort_current_task,json=shouldAbortCurrentTask,proto3" json:"should_abort_current_task,omitempty"`
 	Assignment             *Assignment            `protobuf:"bytes,2,opt,name=assignment,proto3" json:"assignment,omitempty"`
+	AdditionalReduceUrls   []string               `protobuf:"bytes,3,rep,name=additional_reduce_urls,json=additionalReduceUrls,proto3" json:"additional_reduce_urls,omitempty"`
+	AllMapsComplete        bool                   `protobuf:"varint,4,opt,name=all_maps_complete,json=allMapsComplete,proto3" json:"all_maps_complete,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -917,6 +927,20 @@ func (x *HeartbeatResponse) GetAssignment() *Assignment {
 	return nil
 }
 
+func (x *HeartbeatResponse) GetAdditionalReduceUrls() []string {
+	if x != nil {
+		return x.AdditionalReduceUrls
+	}
+	return nil
+}
+
+func (x *HeartbeatResponse) GetAllMapsComplete() bool {
+	if x != nil {
+		return x.AllMapsComplete
+	}
+	return false
+}
+
 var File_proto_gomr_v1_control_proto protoreflect.FileDescriptor
 
 const file_proto_gomr_v1_control_proto_rawDesc = "" +
@@ -956,7 +980,7 @@ const file_proto_gomr_v1_control_proto_rawDesc = "" +
 	"\tinput_uri\x18\x03 \x01(\tR\binputUri\x12$\n" +
 	"\x0emap_source_uri\x18\x04 \x01(\tR\fmapSourceUri\x12&\n" +
 	"\x0fmap_compile_cmd\x18\x05 \x01(\tR\rmapCompileCmd\x12+\n" +
-	"\x11reduce_partitions\x18\x06 \x01(\rR\x10reducePartitions\"\xfe\x01\n" +
+	"\x11reduce_partitions\x18\x06 \x01(\rR\x10reducePartitions\"\xaa\x02\n" +
 	"\x10ReduceAssignment\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1c\n" +
@@ -965,7 +989,8 @@ const file_proto_gomr_v1_control_proto_rawDesc = "" +
 	"\x12reduce_compile_cmd\x18\x05 \x01(\tR\x10reduceCompileCmd\x12\x1d\n" +
 	"\n" +
 	"input_urls\x18\x06 \x03(\tR\tinputUrls\x12#\n" +
-	"\routput_prefix\x18\a \x01(\tR\foutputPrefix\"\xa8\x01\n" +
+	"\routput_prefix\x18\a \x01(\tR\foutputPrefix\x12*\n" +
+	"\x11all_maps_complete\x18\b \x01(\bR\x0fallMapsComplete\"\xa8\x01\n" +
 	"\x13PromotionAssignment\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1d\n" +
@@ -979,12 +1004,14 @@ const file_proto_gomr_v1_control_proto_rawDesc = "" +
 	"\x03map\x18\x01 \x01(\v2\x16.gomr.v1.MapAssignmentH\x00R\x03map\x123\n" +
 	"\x06reduce\x18\x02 \x01(\v2\x19.gomr.v1.ReduceAssignmentH\x00R\x06reduce\x12<\n" +
 	"\tpromotion\x18\x03 \x01(\v2\x1c.gomr.v1.PromotionAssignmentH\x00R\tpromotionB\x06\n" +
-	"\x04kind\"\x83\x01\n" +
+	"\x04kind\"\xe5\x01\n" +
 	"\x11HeartbeatResponse\x129\n" +
 	"\x19should_abort_current_task\x18\x01 \x01(\bR\x16shouldAbortCurrentTask\x123\n" +
 	"\n" +
 	"assignment\x18\x02 \x01(\v2\x13.gomr.v1.AssignmentR\n" +
-	"assignment*m\n" +
+	"assignment\x124\n" +
+	"\x16additional_reduce_urls\x18\x03 \x03(\tR\x14additionalReduceUrls\x12*\n" +
+	"\x11all_maps_complete\x18\x04 \x01(\bR\x0fallMapsComplete*m\n" +
 	"\vWorkerState\x12\x15\n" +
 	"\x11WORKER_STATE_IDLE\x10\x00\x12\x15\n" +
 	"\x11WORKER_STATE_BUSY\x10\x01\x12\x19\n" +

@@ -37,4 +37,7 @@ type Worker struct {
 
 	// spillThreshold is the max bytes to hold in memory before spilling to disk.
 	spillThreshold int
+
+	// reduceUpdates receives HeartbeatResponse updates with additional reduce URLs.
+	reduceUpdates chan *gomrv1.HeartbeatResponse
 }
