@@ -25,9 +25,11 @@ A distributed MapReduce framework in Go. Language-agnostic — write your Map an
     └────────────────────────────────────────┘
 ```
 
-- **Master** coordinates jobs, tracks workers, assigns tasks via heartbeat responses.
-- **Workers** register with the master, execute map/reduce tasks as child processes, serve intermediate data over HTTP.
+- **Master** coordinates jobs, tracks workers, assigns tasks via heartbeat responses, and handles fault tolerance.
+- **Workers** register with the master, execute map/reduce tasks as child processes, and serve intermediate data over HTTP.
 - **S3** stores input data, map/reduce source files, and final output.
+- **Speculative Execution** automatically detects and duplicates straggling tasks to mitigate slow nodes.
+- **Pipelined Execution** allows reduce workers to start early and prefetch intermediate partitions incrementally while the map phase is still ongoing.
 
 ## I/O Contract
 

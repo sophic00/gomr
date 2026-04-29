@@ -79,11 +79,11 @@ Users submit jobs to the Master via an HTTP POST request containing a JSON paylo
 
 ### 3.4 Reduce Phase
 
-1. Worker B sends a gRPC heartbeat with status "Idle". The Master replies by assigning a Reduce task (e.g., partition 5).
-2. The Master provides Worker B with a list of HTTP URLs (pointing to the Map workers that hold partition 5).
-3. Worker B downloads all partition 5 files using HTTP GET.
-4. Worker B sorts the keys, pipes the sorted data to the compiled reduce binary's stdin, reads output from stdout, and writes the final output to a temporary, task-attempt-scoped object in S3 (e.g., `part-5-<attempt-id>.tmp`).
-5. **Finalize Output:** Once the object is fully written, Worker B reports completion to the Master. The Master blesses the winning attempt and instructs the worker to promote the file via `CopyObject` + `DeleteObject` (since S3 lacks atomic rename).
+1. Worker B sends a gRPC heartbeat. The Master assigns a Reduce task (e.g., partition 5) **early**, even if the Mapping phase is still ongoing, provided at least one map task has finished.
+2. The Master continuously provides Worker B with updated lists of HTTP URLs pointing to Map workers that hold partition 5 via Heartbeat responses.
+3. Worker B incrementally downloads partition 5 files using HTTP GET as they become available.
+4. Once all map tasks finish, Worker B sorts the keys, pipes the sorted data to the compiled reduce binary's stdin, reads output from stdout, and writes the final output to a temporary, task-attempt-scoped object in S3 (e.g., `part-5-<attempt-id>.tmp`).
+5. **Finalize Output:** Once the object is fully written, Worker B reports completion to the Master. The Master blesses the winning attempt and assigns a Promotion task to promote the file via `CopyObject` + `DeleteObject` (since S3 lacks atomic rename).
 
 ## 4. Intermediate Storage
 
@@ -108,7 +108,7 @@ Since intermediate data is either in-memory buffers or written completely before
 - **Auto Re-registration:** If a worker's heartbeat receives a "not registered" error (e.g., after a master restart), the worker automatically re-registers.
 - **Reduce Phase Failure Recovery:** If a Reduce worker fails to fetch files from a dead Map worker, it reports the failure. The Master resets both the failed Reduce task and the corresponding Map task.
 - **Master Recovery (Checkpointing):** The Master takes periodic snapshots of cluster state and saves them to S3. On restart, it loads the latest valid snapshot. Since MapReduce tasks are idempotent, losing state between snapshots results in safe, redundant re-execution.
-- **Speculative Execution (Future):** If a task is running unusually slowly, the Master may speculatively assign the same task to another idle worker. Whichever worker completes first "wins."
+- **Speculative Execution:** If a task is running unusually slowly (e.g., taking > 1.5x the median execution time of its peers), the Master speculatively assigns a duplicate attempt to another idle worker. Whichever worker completes the task first "wins," and late results from duplicate attempts are safely ignored.
 
 ## 6. Configuration
 
@@ -141,18 +141,10 @@ aws_region = "garage"
 
 Allow users to provide an offset calculator where the Master calculates the offset of each split and sends the worker those offsets, so workers can read that range of data using S3 `Range` requests. This enables processing large files without requiring pre-splitting.
 
-### 7.2 Prefetch
-
-Workers will be able to prefetch the next task's data from S3 or Map workers while the current task is still running, reducing idle time between tasks.
-
-### 7.3 Concurrent Job Execution
+### 7.2 Concurrent Job Execution
 
 Currently, jobs are processed sequentially. Future work will enable multiple jobs to execute simultaneously, with configurable resource allocation per job.
 
-### 7.4 Custom Partitioning Functions
+### 7.3 Custom Partitioning Functions
 
 Allow users to supply custom hash/partitioning functions to control how map output is distributed across reduce tasks.
-
-### 7.5 Pipelined Execution
-
-A Reduce task for partition `k` could begin as soon as all Map tasks that contribute to partition `k` are complete, rather than waiting for all Map tasks to finish.
