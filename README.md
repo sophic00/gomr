@@ -4,32 +4,94 @@ A distributed MapReduce framework in Go. Language-agnostic — write your Map an
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                        Master                           │
-│  HTTP API (:8080)              gRPC Control (:9090)     │
-│  • POST /submit                • RegisterWorker         │
-│  • GET  /status                • Heartbeat (pull-based  │
-│  • DELETE /jobs/{id}             task assignment)        │
-└──────────┬──────────────────────────┬───────────────────┘
-           │                          │
-    ┌──────┴──────┐            ┌──────┴──────┐
-    │  Worker A   │            │  Worker B   │
-    │  HTTP :8081 │◄──────────►│  HTTP :8082 │
-    │  (partitions)            │  (partitions)│
-    └─────────────┘            └──────────────┘
-           │                          │
-    ┌──────┴──────────────────────────┴──────┐
-    │         S3-Compatible Storage          │
-    │  (input data, source files, output)    │
-    └────────────────────────────────────────┘
+### System Topology
+
+```mermaid
+graph TB
+    subgraph Master["Master Node"]
+        HTTP["HTTP API :8080"]
+        GRPC["gRPC Control Plane :9090"]
+        Sched["Scheduler"]
+        Monitor["Worker Monitor"]
+        HTTP --- Sched
+        GRPC --- Sched
+        GRPC --- Monitor
+    end
+
+    subgraph WorkerA["Worker A"]
+        ExA["Executor"]
+        PartA["Partition Store"]
+        HTTPA["HTTP :8081"]
+        ExA --> PartA --> HTTPA
+    end
+
+    subgraph WorkerB["Worker B"]
+        ExB["Executor"]
+        PartB["Partition Store"]
+        HTTPB["HTTP :8082"]
+        ExB --> PartB --> HTTPB
+    end
+
+    S3[(S3 Storage)]
+
+    GRPC -- heartbeat / assignment --> ExA
+    GRPC -- heartbeat / assignment --> ExB
+    HTTPA -- partition data --> ExB
+    HTTPB -- partition data --> ExA
+    ExA -- read input / write output --> S3
+    ExB -- read input / write output --> S3
+    HTTP -- list input objects --> S3
 ```
 
-- **Master** coordinates jobs, tracks workers, assigns tasks via heartbeat responses, and handles fault tolerance.
-- **Workers** register with the master, execute map/reduce tasks as child processes, and serve intermediate data over HTTP.
-- **S3** stores input data, map/reduce source files, and final output.
-- **Speculative Execution** automatically detects and duplicates straggling tasks to mitigate slow nodes.
-- **Pipelined Execution** allows reduce workers to start early and prefetch intermediate partitions incrementally while the map phase is still ongoing.
+### Job Execution Flow
+
+```mermaid
+sequenceDiagram
+    participant Op as Operator
+    participant M as Master
+    participant WM as Map Worker
+    participant WR as Reduce Worker
+    participant S3 as S3 Storage
+
+    Op->>M: POST /submit
+    M->>S3: ListObjects(input prefix)
+    S3-->>M: split-0, split-1, ... split-N
+    M-->>Op: 202 Accepted (job_id)
+
+    WM->>M: Heartbeat (IDLE)
+    M-->>WM: MapAssignment(split-0, attempt_id)
+    WM->>S3: Download map source + compile
+    WM->>S3: Stream split-0 to child stdin
+    WM->>WM: Partition stdout into R buffers
+
+    Note over M,WR: Early Reduce Prefetch: assigned<br/>once at least 1 map task is done
+
+    WR->>M: Heartbeat (IDLE)
+    M-->>WR: ReduceAssignment(partition=0, all_maps_complete=false)
+    WR->>S3: Download reduce source + compile
+    WR->>WM: HTTP GET /partitions/.../0
+
+    WM->>M: Heartbeat (result=SUCCESS, partition urls)
+    M->>M: Record completion time for speculation
+
+    WR->>M: Heartbeat (BUSY)
+    M-->>WR: additional_urls, all_maps_complete=true
+    WR->>WR: Gather remaining partitions, sort by key
+    WR->>WR: Pipe sorted data to reduce child
+    WR->>S3: Upload part-0.tmp
+
+    WR->>M: Heartbeat (result=SUCCESS, output=tmp)
+    M-->>WR: PromotionAssignment(tmp to final)
+    WR->>S3: CopyObject + DeleteObject
+    WR->>M: Heartbeat (result=SUCCESS)
+    M->>M: Job completed
+```
+
+- **Master** coordinates jobs, tracks workers via heartbeat, and handles fault tolerance.
+- **Workers** execute map/reduce tasks as child processes and serve intermediate data over HTTP.
+- **S3** stores input splits, user source files, and final output.
+- **Speculative Execution** detects stragglers (> 1.5× median task time) and issues duplicate attempts.
+- **Pipelined Execution** assigns reduce workers early and prefetches partitions incrementally.
 
 ## I/O Contract
 
