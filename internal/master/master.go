@@ -40,8 +40,8 @@ func NewMaster(cfg *config.Config) (*Master, error) {
 		queue:              make(chan string, 1000),
 		s3Client:           minioClient,
 		httpClient:         &http.Client{Timeout: 5 * time.Second},
-		heartbeatInterval:  5 * time.Second,
-		workerTimeout:      15 * time.Second,
+		heartbeatInterval:  cfg.WorkerHeartbeatInterval,
+		workerTimeout:      cfg.WorkerHeartbeatInterval * 3,
 		checkpointInterval: cfg.CheckpointInterval,
 		checkpointS3URI:    cfg.CheckpointS3URI,
 	}, nil
