@@ -26,6 +26,10 @@ func (m *Master) assignTask(workerID string) *gomrv1.Assignment {
 	case JobStatusMapping:
 		return m.assignMapTask(job, workerID)
 	case JobStatusReducing:
+		// First check for pending promotions (completed reduce tasks with temp objects).
+		if a := m.assignPromotionTask(job, workerID); a != nil {
+			return a
+		}
 		return m.assignReduceTask(job, workerID)
 	default:
 		return nil
@@ -123,6 +127,44 @@ func (m *Master) assignReduceTask(job *Job, workerID string) *gomrv1.Assignment 
 
 	// No idle reduce tasks — check if all done.
 	m.advanceJob(job)
+	return nil
+}
+
+// assignPromotionTask finds a completed reduce task with a pending temp object
+// and assigns a promotion task to move it to its final S3 location.
+func (m *Master) assignPromotionTask(job *Job, workerID string) *gomrv1.Assignment {
+	for _, rt := range job.ReduceTasks {
+		if rt.Status != TaskStatusCompleted || rt.TempObject == "" {
+			continue
+		}
+
+		// Build the final output object as a full S3 URI.
+		bucket, prefix, _ := parseS3URI(job.OutputPrefix)
+		finalObject := fmt.Sprintf("s3://%s/%spart-%d", bucket, prefix, rt.Partition)
+		// TempObject is already stored as a full S3 URI by the reduce executor.
+		attemptID := uuid.NewString()
+
+		slog.Info("assigning promotion task",
+			"job_id", job.ID,
+			"task_id", rt.ID,
+			"partition", rt.Partition,
+			"worker_id", workerID,
+			"temp_object", rt.TempObject,
+			"final_object", finalObject,
+		)
+
+		return &gomrv1.Assignment{
+			Kind: &gomrv1.Assignment_Promotion{
+				Promotion: &gomrv1.PromotionAssignment{
+					JobId:       job.ID,
+					TaskId:      rt.ID,
+					AttemptId:   attemptID,
+					TempObject:  rt.TempObject,
+					FinalObject: finalObject,
+				},
+			},
+		}
+	}
 	return nil
 }
 

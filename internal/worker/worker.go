@@ -282,30 +282,19 @@ func (w *Worker) handleAssignment(ctx context.Context, assignment *gomrv1.Assign
 		}
 		w.mu.Unlock()
 
-		// TODO: implement executeReduce in Slice 3
-		slog.Warn("reduce execution not yet implemented")
-		result = &gomrv1.TaskResult{
-			Task:         w.CurrentTask,
-			State:        gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED,
-			ErrorMessage: "reduce not yet implemented",
-		}
+		result = w.executeReduce(taskCtx, kind.Reduce)
 
 	case *gomrv1.Assignment_Promotion:
 		w.mu.Lock()
 		w.CurrentTask = &gomrv1.TaskRef{
-			JobId:  kind.Promotion.JobId,
-			TaskId: kind.Promotion.TaskId,
-			Phase:  gomrv1.TaskPhase_TASK_PHASE_PROMOTION,
+			JobId:     kind.Promotion.JobId,
+			TaskId:    kind.Promotion.TaskId,
+			Phase:     gomrv1.TaskPhase_TASK_PHASE_PROMOTION,
+			AttemptId: kind.Promotion.AttemptId,
 		}
 		w.mu.Unlock()
 
-		// TODO: implement executePromotion in Slice 3
-		slog.Warn("promotion execution not yet implemented")
-		result = &gomrv1.TaskResult{
-			Task:         w.CurrentTask,
-			State:        gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED,
-			ErrorMessage: "promotion not yet implemented",
-		}
+		result = w.executePromotion(taskCtx, kind.Promotion)
 	}
 
 	// Store result for the next heartbeat and transition back to idle.

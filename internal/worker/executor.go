@@ -2,15 +2,19 @@ package worker
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	gomrv1 "github.com/sophic00/gomr/proto/gomr/v1"
@@ -107,6 +111,223 @@ func (w *Worker) executeMap(ctx context.Context, a *gomrv1.MapAssignment) *gomrv
 	)
 
 	return result
+}
+
+// executeReduce runs a reduce task:
+//  1. Download and compile the reduce source.
+//  2. Download all partition files from map workers via HTTP.
+//  3. Sort all data by key.
+//  4. Pipe sorted data to the reduce child process.
+//  5. Upload child output to S3 as a temporary object.
+func (w *Worker) executeReduce(ctx context.Context, a *gomrv1.ReduceAssignment) *gomrv1.TaskResult {
+	result := &gomrv1.TaskResult{
+		Task: &gomrv1.TaskRef{
+			JobId:  a.JobId,
+			TaskId: a.TaskId,
+			Phase:  gomrv1.TaskPhase_TASK_PHASE_REDUCE,
+		},
+	}
+
+	// 1. Download and compile reduce source.
+	binaryPath, err := w.downloadAndCompile(ctx, a.ReduceSourceUri, a.ReduceCompileCmd)
+	if err != nil {
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = fmt.Sprintf("compile failed: %v", err)
+		slog.Error("reduce compile failed", "job_id", a.JobId, "task_id", a.TaskId, "error", err)
+		return result
+	}
+
+	// 2. Download all partition files from map workers.
+	slog.Info("downloading partitions for reduce",
+		"job_id", a.JobId,
+		"task_id", a.TaskId,
+		"partition", a.Partition,
+		"sources", len(a.InputUrls),
+	)
+
+	var allLines [][]byte
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	for _, inputURL := range a.InputUrls {
+		lines, err := downloadPartition(ctx, httpClient, inputURL)
+		if err != nil {
+			result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+			result.ErrorMessage = fmt.Sprintf("failed to download partition from %s: %v", inputURL, err)
+			slog.Error("partition download failed", "url", inputURL, "error", err)
+			return result
+		}
+		allLines = append(allLines, lines...)
+	}
+
+	// 3. Sort all lines by key (everything before the first tab).
+	sort.Slice(allLines, func(i, j int) bool {
+		keyI := extractKey(allLines[i])
+		keyJ := extractKey(allLines[j])
+		return bytes.Compare(keyI, keyJ) < 0
+	})
+
+	// Build a reader from sorted lines.
+	sortedData := bytes.Join(allLines, []byte{'\n'})
+	if len(sortedData) > 0 {
+		sortedData = append(sortedData, '\n')
+	}
+	sortedReader := bytes.NewReader(sortedData)
+
+	// 4. Run reduce child process.
+	stdout, wait, err := runChildProcess(ctx, binaryPath, sortedReader)
+	if err != nil {
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = fmt.Sprintf("failed to start reduce child: %v", err)
+		return result
+	}
+
+	// Read all child output.
+	output, err := io.ReadAll(stdout)
+	if err != nil {
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = fmt.Sprintf("failed to read reduce output: %v", err)
+		return result
+	}
+
+	if err := wait(); err != nil {
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = fmt.Sprintf("reduce child process failed: %v", err)
+		return result
+	}
+
+	// 5. Upload output to S3 as a temp object.
+	bucket, prefix, err := parseS3URI(a.OutputPrefix)
+	if err != nil {
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = fmt.Sprintf("invalid output prefix: %v", err)
+		return result
+	}
+
+	tempObjectKey := fmt.Sprintf("%spart-%d-%s.tmp", prefix, a.Partition, a.TaskId)
+	tempObjectURI := fmt.Sprintf("s3://%s/%s", bucket, tempObjectKey)
+
+	_, err = w.s3Client.PutObject(ctx, bucket, tempObjectKey,
+		bytes.NewReader(output), int64(len(output)),
+		minio.PutObjectOptions{ContentType: "text/plain"},
+	)
+	if err != nil {
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = fmt.Sprintf("failed to upload reduce output: %v", err)
+		return result
+	}
+
+	result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_SUCCESS
+	result.OutputObject = tempObjectURI
+
+	slog.Info("reduce task completed",
+		"job_id", a.JobId,
+		"task_id", a.TaskId,
+		"partition", a.Partition,
+		"temp_object", tempObjectURI,
+		"output_bytes", len(output),
+	)
+
+	return result
+}
+
+// executePromotion promotes a temp S3 object to its final key via CopyObject + DeleteObject.
+func (w *Worker) executePromotion(ctx context.Context, a *gomrv1.PromotionAssignment) *gomrv1.TaskResult {
+	result := &gomrv1.TaskResult{
+		Task: &gomrv1.TaskRef{
+			JobId:     a.JobId,
+			TaskId:    a.TaskId,
+			Phase:     gomrv1.TaskPhase_TASK_PHASE_PROMOTION,
+			AttemptId: a.AttemptId,
+		},
+	}
+
+	// Both TempObject and FinalObject are full S3 URIs (e.g., s3://bucket/key)
+	// set by the master scheduler and reduce executor.
+
+	tempBucket, tempKey, err := parseS3URI(a.TempObject)
+	if err != nil {
+		// If it's not a URI, fall back to treating it as a key and guess the bucket.
+		// This shouldn't happen if we fix the master to send URIs.
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = fmt.Sprintf("invalid temp object URI: %v", err)
+		return result
+	}
+
+	_, finalKey, err := parseS3URI(a.FinalObject)
+	if err != nil {
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = fmt.Sprintf("invalid final object URI: %v", err)
+		return result
+	}
+
+	slog.Info("promoting temp object to final",
+		"job_id", a.JobId,
+		"temp", a.TempObject,
+		"final", a.FinalObject,
+	)
+
+	// CopyObject: temp → final
+	_, err = w.s3Client.CopyObject(ctx,
+		minio.CopyDestOptions{Bucket: tempBucket, Object: finalKey},
+		minio.CopySrcOptions{Bucket: tempBucket, Object: tempKey},
+	)
+	if err != nil {
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = fmt.Sprintf("CopyObject failed: %v", err)
+		return result
+	}
+
+	// DeleteObject: remove temp
+	err = w.s3Client.RemoveObject(ctx, tempBucket, tempKey, minio.RemoveObjectOptions{})
+	if err != nil {
+		slog.Warn("failed to delete temp object (non-fatal)", "key", tempKey, "error", err)
+		// Non-fatal: the final object exists. We can clean up later.
+	}
+
+	result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_SUCCESS
+	result.OutputObject = a.FinalObject
+
+	slog.Info("promotion completed",
+		"job_id", a.JobId,
+		"final_object", a.FinalObject,
+	)
+
+	return result
+}
+
+// downloadPartition downloads a partition file from a map worker via HTTP GET
+// and returns the lines as byte slices.
+func downloadPartition(ctx context.Context, client *http.Client, partitionURL string) ([][]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, partitionURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, partitionURL)
+	}
+
+	var lines [][]byte
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := make([]byte, len(scanner.Bytes()))
+		copy(line, scanner.Bytes())
+		lines = append(lines, line)
+	}
+	return lines, scanner.Err()
+}
+
+// extractKey returns the key portion of a "key\tvalue" line (everything before the first tab).
+func extractKey(line []byte) []byte {
+	if idx := bytes.IndexByte(line, '\t'); idx >= 0 {
+		return line[:idx]
+	}
+	return line
 }
 
 // downloadAndCompile downloads a source file from S3, runs the user's compile
