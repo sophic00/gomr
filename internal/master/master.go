@@ -33,15 +33,17 @@ func NewMaster(cfg *config.Config) (*Master, error) {
 	}
 
 	return &Master{
-		httpPort:          cfg.MasterHTTPPort,
-		grpcPort:          cfg.MasterGRPCPort,
-		jobs:              make(map[string]*Job),
-		workers:           make(map[string]*Worker),
-		queue:             make(chan string, 1000),
-		s3Client:          minioClient,
-		httpClient:        &http.Client{Timeout: 5 * time.Second},
-		heartbeatInterval: 5 * time.Second,
-		workerTimeout:     15 * time.Second,
+		httpPort:           cfg.MasterHTTPPort,
+		grpcPort:           cfg.MasterGRPCPort,
+		jobs:               make(map[string]*Job),
+		workers:            make(map[string]*Worker),
+		queue:              make(chan string, 1000),
+		s3Client:           minioClient,
+		httpClient:         &http.Client{Timeout: 5 * time.Second},
+		heartbeatInterval:  5 * time.Second,
+		workerTimeout:      15 * time.Second,
+		checkpointInterval: cfg.CheckpointInterval,
+		checkpointS3URI:    cfg.CheckpointS3URI,
 	}, nil
 }
 
@@ -90,6 +92,16 @@ func (m *Master) Run() error {
 	}()
 
 	go m.monitorWorkers(ctx)
+
+	// Checkpointing: attempt to load previous state, start periodic saves.
+	if m.checkpointS3URI != "" {
+		if err := m.loadCheckpoint(ctx); err != nil {
+			slog.Warn("failed to load checkpoint, starting fresh", "error", err)
+		}
+		go m.checkpointLoop(ctx)
+	} else {
+		slog.Info("checkpointing disabled (no checkpoint_s3_uri configured)")
+	}
 
 	// Wait for shutdown signal or server error.
 	select {

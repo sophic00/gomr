@@ -176,6 +176,10 @@ worker_heartbeat_interval = "5s"
 # Intermediate storage: partitions below this threshold (MB) stay in memory.
 intermediate_spill_threshold_mb = 256
 
+# Checkpointing
+checkpoint_interval = "30s"
+checkpoint_s3_uri = "s3://thia/gomr-checkpoints/"
+
 # S3
 s3_endpoint = "thia:3900"
 aws_access_key_id = "your-key"

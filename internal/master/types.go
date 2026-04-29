@@ -44,34 +44,34 @@ const (
 // TaskAttempt tracks a single execution attempt of a task.
 // Multiple attempts can exist for retries and speculative execution.
 type TaskAttempt struct {
-	AttemptID string
-	WorkerID  string
-	StartedAt time.Time
+	AttemptID string    `json:"attempt_id"`
+	WorkerID  string    `json:"worker_id"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 type MapTask struct {
-	ID       string
-	InputURI string
-	Status   TaskStatus
+	ID       string     `json:"id"`
+	InputURI string     `json:"input_uri"`
+	Status   TaskStatus `json:"status"`
 
 	// Attempts tracks all execution attempts (supports retries + speculation).
-	Attempts []*TaskAttempt
+	Attempts []*TaskAttempt `json:"attempts,omitempty"`
 
 	// PartitionURLs is populated on completion — one HTTP URL per reduce partition,
 	// pointing to the winning worker's partition data.
-	PartitionURLs []string
+	PartitionURLs []string `json:"partition_urls,omitempty"`
 }
 
 type ReduceTask struct {
-	ID        string
-	Partition int // 0-based index of the reduce partition this task handles.
-	Status    TaskStatus
+	ID        string     `json:"id"`
+	Partition int        `json:"partition"` // 0-based index of the reduce partition this task handles.
+	Status    TaskStatus `json:"status"`
 
-	Attempts []*TaskAttempt
+	Attempts []*TaskAttempt `json:"attempts,omitempty"`
 
 	// Set on completion:
-	WinningAttemptID string // AttemptID of the winning attempt.
-	TempObject       string // S3 key of the temporary output object.
+	WinningAttemptID string `json:"winning_attempt_id,omitempty"` // AttemptID of the winning attempt.
+	TempObject       string `json:"temp_object,omitempty"`        // S3 key of the temporary output object.
 }
 
 // --- Job Model ---
@@ -88,26 +88,26 @@ const (
 )
 
 type Job struct {
-	ID           string
-	InputPrefix  string
-	OutputPrefix string
+	ID           string `json:"id"`
+	InputPrefix  string `json:"input_prefix"`
+	OutputPrefix string `json:"output_prefix"`
 
-	MapSourceURI     string
-	ReduceSourceURI  string
-	MapCompileCmd    string
-	ReduceCompileCmd string
-	NumReduceTasks   int
+	MapSourceURI     string `json:"map_source_uri"`
+	ReduceSourceURI  string `json:"reduce_source_uri"`
+	MapCompileCmd    string `json:"map_compile_cmd"`
+	ReduceCompileCmd string `json:"reduce_compile_cmd"`
+	NumReduceTasks   int    `json:"num_reduce_tasks"`
 
-	Status JobStatus
+	Status JobStatus `json:"status"`
 
-	MapTasks        []*MapTask
-	ReduceTasks     []*ReduceTask
-	MapTaskIndex    map[string]*MapTask
-	ReduceTaskIndex map[string]*ReduceTask
+	MapTasks        []*MapTask          `json:"map_tasks"`
+	ReduceTasks     []*ReduceTask       `json:"reduce_tasks"`
+	MapTaskIndex    map[string]*MapTask    `json:"-"` // rebuilt on restore
+	ReduceTaskIndex map[string]*ReduceTask `json:"-"` // rebuilt on restore
 
 	// Completion tracking for speculative execution thresholds.
-	MapCompletionTimes    []time.Duration
-	ReduceCompletionTimes []time.Duration
+	MapCompletionTimes    []time.Duration `json:"map_completion_times,omitempty"`
+	ReduceCompletionTimes []time.Duration `json:"reduce_completion_times,omitempty"`
 }
 
 // --- Status API ---
@@ -142,6 +142,10 @@ type Master struct {
 	httpClient        *http.Client
 	heartbeatInterval time.Duration
 	workerTimeout     time.Duration
+
+	// Checkpointing
+	checkpointInterval time.Duration
+	checkpointS3URI    string // e.g. "s3://bucket/gomr-checkpoints/"; empty disables checkpointing
 }
 
 // --- Worker (master-side representation) ---

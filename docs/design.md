@@ -108,6 +108,7 @@ Since intermediate data is either in-memory buffers or written completely before
 - **Auto Re-registration:** If a worker's heartbeat receives a "not registered" error (e.g., after a master restart), the worker automatically re-registers.
 - **Reduce Phase Failure Recovery:** If a Reduce worker fails to fetch partition files (e.g., from a dead Map worker), it reports the failure to the Master. The Master resets the Reduce task to "idle" so it can be retried.
 - **Speculative Execution:** If a task is running unusually slowly (e.g., taking > 1.5x the median execution time of its peers), the Master speculatively assigns a duplicate attempt to another idle worker. Whichever worker completes the task first "wins," and late results from duplicate attempts are safely ignored.
+- **Master Checkpointing:** The Master periodically saves a JSON snapshot of all job and task state to S3 (configurable via `checkpoint_interval` and `checkpoint_s3_uri`). On restart, it loads the latest checkpoint, rebuilds internal indexes, and resets any in-progress tasks to "idle" for safe re-execution. A final checkpoint is also saved on graceful shutdown. Checkpointing can be disabled by leaving `checkpoint_s3_uri` empty.
 
 ## 6. Configuration
 
@@ -126,6 +127,10 @@ worker_heartbeat_interval = "5s"
 
 # Intermediate storage
 intermediate_spill_threshold_mb = 256
+
+# Checkpointing
+checkpoint_interval = "30s"
+checkpoint_s3_uri = "s3://thia/gomr-checkpoints/"
 
 # S3
 s3_endpoint = "thia:3900"
@@ -148,10 +153,6 @@ Currently, jobs are processed sequentially. Future work will enable multiple job
 
 Allow users to supply custom hash/partitioning functions to control how map output is distributed across reduce tasks.
 
-### 7.4 Master Recovery (Checkpointing)
-
-The Master will take periodic snapshots of cluster state and save them to S3. On restart, it will load the latest valid snapshot. Since MapReduce tasks are idempotent, losing state between snapshots results in safe, redundant re-execution.
-
-### 7.5 Cascading Map Task Reset
+### 7.4 Cascading Map Task Reset
 
 When a Reduce task fails because a Map worker that holds needed partition data has died, the Master will identify and re-run the corresponding Map task to regenerate the missing intermediate data.

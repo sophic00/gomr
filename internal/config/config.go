@@ -25,6 +25,10 @@ type Config struct {
 
 	// Intermediate storage
 	IntermediateSpillThreshold int `mapstructure:"intermediate_spill_threshold_mb"` // MB; 0 = always in-memory
+
+	// Master checkpointing
+	CheckpointInterval time.Duration `mapstructure:"checkpoint_interval"` // How often to save state to S3
+	CheckpointS3URI    string        `mapstructure:"checkpoint_s3_uri"`    // S3 URI prefix for checkpoint, e.g. s3://bucket/gomr-checkpoints/
 }
 
 func Load() (*Config, error) {
@@ -41,6 +45,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("worker_heartbeat_interval", "5s")
 	viper.SetDefault("s3_endpoint", "thia:3900")
 	viper.SetDefault("intermediate_spill_threshold_mb", 256)
+	viper.SetDefault("checkpoint_interval", "30s")
+	viper.SetDefault("checkpoint_s3_uri", "")
 
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

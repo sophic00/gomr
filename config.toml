@@ -16,6 +16,12 @@ worker_heartbeat_interval = "5s"
 # Above it, they spill to disk. Set to 0 for always in-memory.
 intermediate_spill_threshold_mb = 256
 
+# Master Checkpointing
+# Periodically saves master state to S3 for crash recovery.
+# Set checkpoint_s3_uri to "" to disable checkpointing.
+checkpoint_interval = "30s"
+checkpoint_s3_uri = "s3://thia/gomr-checkpoints/"
+
 # Storage Configuration (S3 / MinIO / Garage)
 s3_endpoint = "thia:3900"
 aws_access_key_id = "GK065ea61db3bb0d603a6ce9b1"
