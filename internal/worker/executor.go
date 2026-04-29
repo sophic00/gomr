@@ -28,9 +28,10 @@ import (
 func (w *Worker) executeMap(ctx context.Context, a *gomrv1.MapAssignment) *gomrv1.TaskResult {
 	result := &gomrv1.TaskResult{
 		Task: &gomrv1.TaskRef{
-			JobId:  a.JobId,
-			TaskId: a.TaskId,
-			Phase:  gomrv1.TaskPhase_TASK_PHASE_MAP,
+			JobId:     a.JobId,
+			TaskId:    a.TaskId,
+			Phase:     gomrv1.TaskPhase_TASK_PHASE_MAP,
+			AttemptId: a.AttemptId,
 		},
 	}
 
@@ -122,9 +123,10 @@ func (w *Worker) executeMap(ctx context.Context, a *gomrv1.MapAssignment) *gomrv
 func (w *Worker) executeReduce(ctx context.Context, a *gomrv1.ReduceAssignment) *gomrv1.TaskResult {
 	result := &gomrv1.TaskResult{
 		Task: &gomrv1.TaskRef{
-			JobId:  a.JobId,
-			TaskId: a.TaskId,
-			Phase:  gomrv1.TaskPhase_TASK_PHASE_REDUCE,
+			JobId:     a.JobId,
+			TaskId:    a.TaskId,
+			Phase:     gomrv1.TaskPhase_TASK_PHASE_REDUCE,
+			AttemptId: a.AttemptId,
 		},
 	}
 
@@ -164,6 +166,9 @@ Drained:
 	}
 	allMapsComplete := a.AllMapsComplete
 
+	pollTimer := time.NewTimer(1 * time.Second)
+	defer pollTimer.Stop()
+
 	for {
 		// Download any pending URLs
 		for u := range pendingURLs {
@@ -184,6 +189,7 @@ Drained:
 		}
 
 		// Wait for updates or tick
+		pollTimer.Reset(1 * time.Second)
 		select {
 		case <-ctx.Done():
 			result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
@@ -198,7 +204,7 @@ Drained:
 					pendingURLs[u] = true
 				}
 			}
-		case <-time.After(1 * time.Second):
+		case <-pollTimer.C:
 			// Keep polling periodically, though channel should wake us
 		}
 	}
@@ -289,8 +295,6 @@ func (w *Worker) executePromotion(ctx context.Context, a *gomrv1.PromotionAssign
 
 	tempBucket, tempKey, err := parseS3URI(a.TempObject)
 	if err != nil {
-		// If it's not a URI, fall back to treating it as a key and guess the bucket.
-		// This shouldn't happen if we fix the master to send URIs.
 		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
 		result.ErrorMessage = fmt.Sprintf("invalid temp object URI: %v", err)
 		return result

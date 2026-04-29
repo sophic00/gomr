@@ -106,8 +106,7 @@ Since intermediate data is either in-memory buffers or written completely before
 - **Heartbeats:** Workers ping the Master periodically via gRPC. If the Master misses heartbeats for a configured timeout, the worker is marked as dead. Any in-progress tasks are reset to "idle" and reassigned.
 - **Graceful Shutdown:** Both Master and Worker handle `SIGTERM`/`SIGINT` signals for graceful shutdown, draining in-flight requests before exiting.
 - **Auto Re-registration:** If a worker's heartbeat receives a "not registered" error (e.g., after a master restart), the worker automatically re-registers.
-- **Reduce Phase Failure Recovery:** If a Reduce worker fails to fetch files from a dead Map worker, it reports the failure. The Master resets both the failed Reduce task and the corresponding Map task.
-- **Master Recovery (Checkpointing):** The Master takes periodic snapshots of cluster state and saves them to S3. On restart, it loads the latest valid snapshot. Since MapReduce tasks are idempotent, losing state between snapshots results in safe, redundant re-execution.
+- **Reduce Phase Failure Recovery:** If a Reduce worker fails to fetch partition files (e.g., from a dead Map worker), it reports the failure to the Master. The Master resets the Reduce task to "idle" so it can be retried.
 - **Speculative Execution:** If a task is running unusually slowly (e.g., taking > 1.5x the median execution time of its peers), the Master speculatively assigns a duplicate attempt to another idle worker. Whichever worker completes the task first "wins," and late results from duplicate attempts are safely ignored.
 
 ## 6. Configuration
@@ -148,3 +147,11 @@ Currently, jobs are processed sequentially. Future work will enable multiple job
 ### 7.3 Custom Partitioning Functions
 
 Allow users to supply custom hash/partitioning functions to control how map output is distributed across reduce tasks.
+
+### 7.4 Master Recovery (Checkpointing)
+
+The Master will take periodic snapshots of cluster state and save them to S3. On restart, it will load the latest valid snapshot. Since MapReduce tasks are idempotent, losing state between snapshots results in safe, redundant re-execution.
+
+### 7.5 Cascading Map Task Reset
+
+When a Reduce task fails because a Map worker that holds needed partition data has died, the Master will identify and re-run the corresponding Map task to regenerate the missing intermediate data.

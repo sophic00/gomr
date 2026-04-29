@@ -275,9 +275,10 @@ func (w *Worker) handleAssignment(ctx context.Context, assignment *gomrv1.Assign
 	case *gomrv1.Assignment_Map:
 		w.mu.Lock()
 		w.CurrentTask = &gomrv1.TaskRef{
-			JobId:  kind.Map.JobId,
-			TaskId: kind.Map.TaskId,
-			Phase:  gomrv1.TaskPhase_TASK_PHASE_MAP,
+			JobId:     kind.Map.JobId,
+			TaskId:    kind.Map.TaskId,
+			Phase:     gomrv1.TaskPhase_TASK_PHASE_MAP,
+			AttemptId: kind.Map.AttemptId,
 		}
 		w.mu.Unlock()
 
@@ -286,9 +287,10 @@ func (w *Worker) handleAssignment(ctx context.Context, assignment *gomrv1.Assign
 	case *gomrv1.Assignment_Reduce:
 		w.mu.Lock()
 		w.CurrentTask = &gomrv1.TaskRef{
-			JobId:  kind.Reduce.JobId,
-			TaskId: kind.Reduce.TaskId,
-			Phase:  gomrv1.TaskPhase_TASK_PHASE_REDUCE,
+			JobId:     kind.Reduce.JobId,
+			TaskId:    kind.Reduce.TaskId,
+			Phase:     gomrv1.TaskPhase_TASK_PHASE_REDUCE,
+			AttemptId: kind.Reduce.AttemptId,
 		}
 		w.mu.Unlock()
 

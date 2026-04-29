@@ -115,6 +115,9 @@ func (m *Master) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	select {
 	case m.queue <- jobID:
 	default:
+		m.mu.Lock()
+		delete(m.jobs, jobID)
+		m.mu.Unlock()
 		http.Error(w, "Job queue is full", http.StatusServiceUnavailable)
 		return
 	}

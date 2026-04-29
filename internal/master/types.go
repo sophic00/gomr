@@ -39,7 +39,6 @@ const (
 	TaskStatusIdle       TaskStatus = "Idle"
 	TaskStatusInProgress TaskStatus = "InProgress"
 	TaskStatusCompleted  TaskStatus = "Completed"
-	TaskStatusFailed     TaskStatus = "Failed"
 )
 
 // TaskAttempt tracks a single execution attempt of a task.

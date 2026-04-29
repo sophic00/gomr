@@ -76,6 +76,7 @@ func (m *Master) assignMapTask(job *Job, workerID string) *gomrv1.Assignment {
 					MapSourceUri:     job.MapSourceURI,
 					MapCompileCmd:    job.MapCompileCmd,
 					ReducePartitions: uint32(job.NumReduceTasks),
+					AttemptId:        attemptID,
 				},
 			},
 		}
@@ -174,6 +175,7 @@ func (m *Master) assignReduceTask(job *Job, workerID string) *gomrv1.Assignment 
 					InputUrls:        inputURLs,
 					OutputPrefix:     job.OutputPrefix,
 					AllMapsComplete:  job.Status == JobStatusReducing,
+					AttemptId:        attemptID,
 				},
 			},
 		}
@@ -222,6 +224,7 @@ func (m *Master) assignReduceTask(job *Job, workerID string) *gomrv1.Assignment 
 							InputUrls:        inputURLs,
 							OutputPrefix:     job.OutputPrefix,
 							AllMapsComplete:  job.Status == JobStatusReducing,
+							AttemptId:        attemptID,
 						},
 					},
 				}
@@ -536,12 +539,6 @@ func elapsedSince(t time.Time) time.Duration {
 	return time.Since(t)
 }
 
-// formatPartitionURL builds the HTTP URL where a reduce worker can download
-// a specific partition from a map worker.
-func formatPartitionURL(workerHTTPAddr, jobID, taskID string, partition int) string {
-	return fmt.Sprintf("http://%s/partitions/%s/%s/%d", workerHTTPAddr, jobID, taskID, partition)
-}
-
 func medianDuration(durations []time.Duration) time.Duration {
 	if len(durations) == 0 {
 		return 0
@@ -560,6 +557,16 @@ func removeAttempt(attempts []*TaskAttempt, attemptID string) []*TaskAttempt {
 	var kept []*TaskAttempt
 	for _, a := range attempts {
 		if a.AttemptID != attemptID {
+			kept = append(kept, a)
+		}
+	}
+	return kept
+}
+
+func removeAttemptByWorker(attempts []*TaskAttempt, workerID string) []*TaskAttempt {
+	var kept []*TaskAttempt
+	for _, a := range attempts {
+		if a.WorkerID != workerID {
 			kept = append(kept, a)
 		}
 	}

@@ -46,7 +46,7 @@ The framework handles partitioning (`hash(key) % R`) and sorting — your code j
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.22+
 - S3-compatible storage (MinIO, Garage, AWS S3)
 - Language toolchain for your map/reduce programs (e.g., Python, Go, Rust)
 

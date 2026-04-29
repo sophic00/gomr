@@ -137,6 +137,7 @@ func (m *Master) monitorWorkers(ctx context.Context) {
 }
 
 // resetWorkerTasksLocked resets any tasks that were assigned to a worker that is now considered dead.
+// It removes the dead worker's attempt and only resets the task to Idle if no other attempts remain.
 // It assumes m.mu is already locked for writing.
 func (m *Master) resetWorkerTasksLocked(workerID string) {
 	worker, exists := m.workers[workerID]
@@ -154,19 +155,35 @@ func (m *Master) resetWorkerTasksLocked(workerID string) {
 	case gomrv1.TaskPhase_TASK_PHASE_MAP:
 		if mt, ok := job.MapTaskIndex[taskRef.TaskId]; ok {
 			if mt.Status == TaskStatusInProgress && isTaskOwnedByWorker(mt.Attempts, workerID) {
-				slog.Info("resetting map task from dead worker",
-					"task_id", mt.ID, "job_id", job.ID, "worker_id", workerID,
-				)
-				mt.Status = TaskStatusIdle
+				mt.Attempts = removeAttemptByWorker(mt.Attempts, workerID)
+				if len(mt.Attempts) == 0 {
+					slog.Info("resetting map task from dead worker (no attempts remain)",
+						"task_id", mt.ID, "job_id", job.ID, "worker_id", workerID,
+					)
+					mt.Status = TaskStatusIdle
+				} else {
+					slog.Info("removed dead worker attempt from map task, other attempt(s) still active",
+						"task_id", mt.ID, "job_id", job.ID, "worker_id", workerID,
+						"remaining_attempts", len(mt.Attempts),
+					)
+				}
 			}
 		}
 	case gomrv1.TaskPhase_TASK_PHASE_REDUCE:
 		if rt, ok := job.ReduceTaskIndex[taskRef.TaskId]; ok {
 			if rt.Status == TaskStatusInProgress && isTaskOwnedByWorker(rt.Attempts, workerID) {
-				slog.Info("resetting reduce task from dead worker",
-					"task_id", rt.ID, "job_id", job.ID, "worker_id", workerID,
-				)
-				rt.Status = TaskStatusIdle
+				rt.Attempts = removeAttemptByWorker(rt.Attempts, workerID)
+				if len(rt.Attempts) == 0 {
+					slog.Info("resetting reduce task from dead worker (no attempts remain)",
+						"task_id", rt.ID, "job_id", job.ID, "worker_id", workerID,
+					)
+					rt.Status = TaskStatusIdle
+				} else {
+					slog.Info("removed dead worker attempt from reduce task, other attempt(s) still active",
+						"task_id", rt.ID, "job_id", job.ID, "worker_id", workerID,
+						"remaining_attempts", len(rt.Attempts),
+					)
+				}
 			}
 		}
 	}
