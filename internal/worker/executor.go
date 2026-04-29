@@ -60,8 +60,11 @@ func (w *Worker) executeMap(ctx context.Context, a *gomrv1.MapAssignment) *gomrv
 	}
 	defer inputObj.Close()
 
+	childCtx, cancelChild := context.WithCancel(ctx)
+	defer cancelChild()
+
 	// 3. Run child process: stdin=S3 stream, capture stdout.
-	stdout, wait, err := runChildProcess(ctx, binaryPath, inputObj)
+	stdout, wait, err := runChildProcess(childCtx, binaryPath, inputObj)
 	if err != nil {
 		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
 		result.ErrorMessage = fmt.Sprintf("failed to start child process: %v", err)
@@ -77,14 +80,32 @@ func (w *Worker) executeMap(ctx context.Context, a *gomrv1.MapAssignment) *gomrv
 		w.workDir,
 	)
 
+	var mapError error
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		if err := ps.Write(scanner.Bytes()); err != nil {
-			slog.Warn("partition write error", "error", err)
+			mapError = fmt.Errorf("failed to write map output partition: %w", err)
+			break
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		slog.Warn("scanner error reading child stdout", "error", err)
+	if mapError == nil {
+		if err := scanner.Err(); err != nil {
+			mapError = fmt.Errorf("failed to read map child stdout: %w", err)
+		}
+	}
+
+	if mapError != nil {
+		cancelChild()
+		_ = wait()
+		ps.Cleanup()
+		result.State = gomrv1.TaskResultState_TASK_RESULT_STATE_FAILED
+		result.ErrorMessage = mapError.Error()
+		slog.Warn("map task output processing failed",
+			"job_id", a.JobId,
+			"task_id", a.TaskId,
+			"error", mapError,
+		)
+		return result
 	}
 
 	// Wait for child to exit.
