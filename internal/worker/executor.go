@@ -252,7 +252,7 @@ Drained:
 		return result
 	}
 
-	tempObjectKey := fmt.Sprintf("%spart-%d-%s.tmp", prefix, a.Partition, a.TaskId)
+	tempObjectKey := fmt.Sprintf("%spart-%d-%s.tmp", prefix, a.Partition, a.AttemptId)
 	tempObjectURI := fmt.Sprintf("s3://%s/%s", bucket, tempObjectKey)
 
 	_, err = w.s3Client.PutObject(ctx, bucket, tempObjectKey,

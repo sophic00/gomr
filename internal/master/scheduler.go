@@ -120,6 +120,7 @@ func (m *Master) assignMapTask(job *Job, workerID string) *gomrv1.Assignment {
 						Map: &gomrv1.MapAssignment{
 							JobId:            job.ID,
 							TaskId:           mt.ID,
+							AttemptId:        attemptID,
 							InputUri:         mt.InputURI,
 							MapSourceUri:     job.MapSourceURI,
 							MapCompileCmd:    job.MapCompileCmd,
