@@ -79,12 +79,12 @@ type ReduceTask struct {
 type JobStatus string
 
 const (
-	JobStatusQueued     JobStatus = "Queued"
-	JobStatusMapping    JobStatus = "Mapping"
-	JobStatusReducing   JobStatus = "Reducing"
-	JobStatusCompleted  JobStatus = "Completed"
-	JobStatusFailed     JobStatus = "Failed"
-	JobStatusAborted    JobStatus = "Aborted"
+	JobStatusQueued    JobStatus = "Queued"
+	JobStatusMapping   JobStatus = "Mapping"
+	JobStatusReducing  JobStatus = "Reducing"
+	JobStatusCompleted JobStatus = "Completed"
+	JobStatusFailed    JobStatus = "Failed"
+	JobStatusAborted   JobStatus = "Aborted"
 )
 
 type Job struct {
@@ -100,8 +100,8 @@ type Job struct {
 
 	Status JobStatus `json:"status"`
 
-	MapTasks        []*MapTask          `json:"map_tasks"`
-	ReduceTasks     []*ReduceTask       `json:"reduce_tasks"`
+	MapTasks        []*MapTask             `json:"map_tasks"`
+	ReduceTasks     []*ReduceTask          `json:"reduce_tasks"`
 	MapTaskIndex    map[string]*MapTask    `json:"-"` // rebuilt on restore
 	ReduceTaskIndex map[string]*ReduceTask `json:"-"` // rebuilt on restore
 
@@ -146,6 +146,13 @@ type Master struct {
 	// Checkpointing
 	checkpointInterval time.Duration
 	checkpointS3URI    string // e.g. "s3://bucket/gomr-checkpoints/"; empty disables checkpointing
+}
+
+// Checkpoint is the serializable snapshot of master state.
+type Checkpoint struct {
+	ActiveJobID string          `json:"active_job_id"`
+	Jobs        map[string]*Job `json:"jobs"`
+	SavedAt     time.Time       `json:"saved_at"`
 }
 
 // --- Worker (master-side representation) ---

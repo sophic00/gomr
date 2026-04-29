@@ -13,13 +13,6 @@ import (
 	"github.com/minio/minio-go/v7"
 )
 
-// Checkpoint is the serializable snapshot of master state.
-type Checkpoint struct {
-	ActiveJobID string          `json:"active_job_id"`
-	Jobs        map[string]*Job `json:"jobs"`
-	SavedAt     time.Time       `json:"saved_at"`
-}
-
 const checkpointObjectKey = "latest.json"
 
 // checkpointKey returns the full S3 object key for the checkpoint file.
@@ -93,11 +86,6 @@ func (m *Master) loadCheckpoint(ctx context.Context) error {
 
 	data, err := io.ReadAll(obj)
 	if err != nil {
-		// Check if the object simply doesn't exist (first run).
-		if strings.Contains(err.Error(), "NoSuchKey") || strings.Contains(err.Error(), "not exist") {
-			slog.Info("no checkpoint found, starting fresh", "uri", m.checkpointS3URI)
-			return nil
-		}
 		return fmt.Errorf("failed to read checkpoint: %w", err)
 	}
 

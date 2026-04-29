@@ -210,6 +210,9 @@ func (m *Master) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job.Status = JobStatusAborted
+	if m.activeJobID == id {
+		m.activeJobID = ""
+	}
 
 	// Note: We don't remove from `m.queue` directly because channel removal is complex.
 	// Instead, the scheduler will pop the job, see it's "Aborted", and simply skip it.
