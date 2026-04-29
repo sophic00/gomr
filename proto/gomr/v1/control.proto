@@ -78,6 +78,7 @@ message MapAssignment {
   string map_source_uri = 4;
   string map_compile_cmd = 5;
   uint32 reduce_partitions = 6;
+  string attempt_id = 7;
 }
 
 message ReduceAssignment {
@@ -89,6 +90,7 @@ message ReduceAssignment {
   repeated string input_urls = 6;
   string output_prefix = 7;
   bool all_maps_complete = 8;
+  string attempt_id = 9;
 }
 
 message PromotionAssignment {

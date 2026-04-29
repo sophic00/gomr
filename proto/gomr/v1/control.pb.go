@@ -523,6 +523,7 @@ type MapAssignment struct {
 	MapSourceUri     string                 `protobuf:"bytes,4,opt,name=map_source_uri,json=mapSourceUri,proto3" json:"map_source_uri,omitempty"`
 	MapCompileCmd    string                 `protobuf:"bytes,5,opt,name=map_compile_cmd,json=mapCompileCmd,proto3" json:"map_compile_cmd,omitempty"`
 	ReducePartitions uint32                 `protobuf:"varint,6,opt,name=reduce_partitions,json=reducePartitions,proto3" json:"reduce_partitions,omitempty"`
+	AttemptId        string                 `protobuf:"bytes,7,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -599,6 +600,13 @@ func (x *MapAssignment) GetReducePartitions() uint32 {
 	return 0
 }
 
+func (x *MapAssignment) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
 type ReduceAssignment struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	JobId            string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -609,6 +617,7 @@ type ReduceAssignment struct {
 	InputUrls        []string               `protobuf:"bytes,6,rep,name=input_urls,json=inputUrls,proto3" json:"input_urls,omitempty"`
 	OutputPrefix     string                 `protobuf:"bytes,7,opt,name=output_prefix,json=outputPrefix,proto3" json:"output_prefix,omitempty"`
 	AllMapsComplete  bool                   `protobuf:"varint,8,opt,name=all_maps_complete,json=allMapsComplete,proto3" json:"all_maps_complete,omitempty"`
+	AttemptId        string                 `protobuf:"bytes,9,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -697,6 +706,13 @@ func (x *ReduceAssignment) GetAllMapsComplete() bool {
 		return x.AllMapsComplete
 	}
 	return false
+}
+
+func (x *ReduceAssignment) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
 }
 
 type PromotionAssignment struct {
@@ -973,14 +989,16 @@ const file_proto_gomr_v1_control_proto_rawDesc = "" +
 	"\x05state\x18\x02 \x01(\x0e2\x14.gomr.v1.WorkerStateR\x05state\x123\n" +
 	"\fcurrent_task\x18\x03 \x01(\v2\x10.gomr.v1.TaskRefR\vcurrentTask\x124\n" +
 	"\vlast_result\x18\x04 \x01(\v2\x13.gomr.v1.TaskResultR\n" +
-	"lastResult\"\xd7\x01\n" +
+	"lastResult\"\xf6\x01\n" +
 	"\rMapAssignment\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1b\n" +
 	"\tinput_uri\x18\x03 \x01(\tR\binputUri\x12$\n" +
 	"\x0emap_source_uri\x18\x04 \x01(\tR\fmapSourceUri\x12&\n" +
 	"\x0fmap_compile_cmd\x18\x05 \x01(\tR\rmapCompileCmd\x12+\n" +
-	"\x11reduce_partitions\x18\x06 \x01(\rR\x10reducePartitions\"\xaa\x02\n" +
+	"\x11reduce_partitions\x18\x06 \x01(\rR\x10reducePartitions\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\a \x01(\tR\tattemptId\"\xc9\x02\n" +
 	"\x10ReduceAssignment\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1c\n" +
@@ -990,7 +1008,9 @@ const file_proto_gomr_v1_control_proto_rawDesc = "" +
 	"\n" +
 	"input_urls\x18\x06 \x03(\tR\tinputUrls\x12#\n" +
 	"\routput_prefix\x18\a \x01(\tR\foutputPrefix\x12*\n" +
-	"\x11all_maps_complete\x18\b \x01(\bR\x0fallMapsComplete\"\xa8\x01\n" +
+	"\x11all_maps_complete\x18\b \x01(\bR\x0fallMapsComplete\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\t \x01(\tR\tattemptId\"\xa8\x01\n" +
 	"\x13PromotionAssignment\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x1d\n" +
