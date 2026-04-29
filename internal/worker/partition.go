@@ -31,6 +31,24 @@ type PartitionStore struct {
 	taskID string
 }
 
+func partitionStoreKey(jobID, taskID string) string {
+	return jobID + "/" + taskID
+}
+
+func parsePartitionRequestPath(path string) (jobID, taskID string, partIdx int, err error) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "partitions" {
+		return "", "", 0, fmt.Errorf("invalid partition URL")
+	}
+
+	partIdx, err = strconv.Atoi(parts[3])
+	if err != nil || partIdx < 0 {
+		return "", "", 0, fmt.Errorf("invalid partition index")
+	}
+
+	return parts[1], parts[2], partIdx, nil
+}
+
 // NewPartitionStore creates a new partition store for R partitions.
 func NewPartitionStore(numPartitions int, spillThreshold int, jobID, taskID, workDir string) *PartitionStore {
 	buffers := make([]*bytes.Buffer, numPartitions)
@@ -138,14 +156,16 @@ func (ps *PartitionStore) URLs(workerHTTPAddr string) []string {
 // ServePartition handles an HTTP request for a specific partition.
 // URL pattern: /partitions/{job_id}/{task_id}/{partition_index}
 func (ps *PartitionStore) ServePartition(w http.ResponseWriter, r *http.Request) {
-	// Parse partition index from URL: /partitions/job/task/N
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) != 4 {
+	jobID, taskID, partIdx, err := parsePartitionRequestPath(r.URL.Path)
+	if err != nil {
 		http.Error(w, "invalid partition URL", http.StatusBadRequest)
 		return
 	}
-	partIdx, err := strconv.Atoi(parts[3])
-	if err != nil || partIdx < 0 || partIdx >= ps.numPartitions {
+	if jobID != ps.jobID || taskID != ps.taskID {
+		http.Error(w, "partition not available", http.StatusNotFound)
+		return
+	}
+	if partIdx >= ps.numPartitions {
 		http.Error(w, "invalid partition index", http.StatusBadRequest)
 		return
 	}

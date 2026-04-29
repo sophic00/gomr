@@ -29,8 +29,8 @@ type Worker struct {
 	// cancelTask cancels the currently running task's context.
 	cancelTask context.CancelFunc
 
-	// partitions holds the current map task's partition data, served via HTTP.
-	partitions *PartitionStore
+	// partitionStores holds completed map partition data by job/task, served via HTTP.
+	partitionStores map[string]*PartitionStore
 
 	// workDir is a temp directory for compiled binaries and spill files.
 	workDir string

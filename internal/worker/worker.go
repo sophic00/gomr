@@ -48,14 +48,15 @@ func NewWorker(cfg *config.Config) (*Worker, error) {
 	}
 
 	return &Worker{
-		ID:             id,
-		MasterGRPCAddr: cfg.MasterGRPCAddr,
-		HTTPAddr:       net.JoinHostPort(cfg.WorkerHost, fmt.Sprintf("%d", cfg.WorkerHTTPPort)),
-		State:          gomrv1.WorkerState_WORKER_STATE_IDLE,
-		s3Client:       s3Client,
-		workDir:        workDir,
-		spillThreshold: cfg.IntermediateSpillThreshold * 1024 * 1024, // MB → bytes
-		reduceUpdates:  make(chan *gomrv1.HeartbeatResponse, 5),
+		ID:              id,
+		MasterGRPCAddr:  cfg.MasterGRPCAddr,
+		HTTPAddr:        net.JoinHostPort(cfg.WorkerHost, fmt.Sprintf("%d", cfg.WorkerHTTPPort)),
+		State:           gomrv1.WorkerState_WORKER_STATE_IDLE,
+		s3Client:        s3Client,
+		workDir:         workDir,
+		partitionStores: make(map[string]*PartitionStore),
+		spillThreshold:  cfg.IntermediateSpillThreshold * 1024 * 1024, // MB → bytes
+		reduceUpdates:   make(chan *gomrv1.HeartbeatResponse, 5),
 	}, nil
 }
 
@@ -72,6 +73,7 @@ func Start(cfg *config.Config) error {
 func (w *Worker) Run(port int) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	defer w.cleanupPartitionStores()
 	defer os.RemoveAll(w.workDir)
 
 	listenAddr := fmt.Sprintf(":%d", port)
@@ -143,15 +145,37 @@ func (w *Worker) handleRoot(hw http.ResponseWriter, r *http.Request) {
 
 // handlePartition serves partition data for reduce workers.
 func (w *Worker) handlePartition(hw http.ResponseWriter, r *http.Request) {
+	jobID, taskID, _, err := parsePartitionRequestPath(r.URL.Path)
+	if err != nil {
+		http.Error(hw, "invalid partition URL", http.StatusBadRequest)
+		return
+	}
+
 	w.mu.RLock()
-	ps := w.partitions
+	ps := w.partitionStores[partitionStoreKey(jobID, taskID)]
 	w.mu.RUnlock()
 
 	if ps == nil {
-		http.Error(hw, "no partitions available", http.StatusNotFound)
+		http.Error(hw, "partition not available", http.StatusNotFound)
 		return
 	}
 	ps.ServePartition(hw, r)
+}
+
+func (w *Worker) cleanupPartitionStores() {
+	w.mu.Lock()
+	stores := make([]*PartitionStore, 0, len(w.partitionStores))
+	for key, ps := range w.partitionStores {
+		if ps != nil {
+			stores = append(stores, ps)
+		}
+		delete(w.partitionStores, key)
+	}
+	w.mu.Unlock()
+
+	for _, ps := range stores {
+		ps.Cleanup()
+	}
 }
 
 // --- gRPC Communication ---

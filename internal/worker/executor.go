@@ -117,9 +117,14 @@ func (w *Worker) executeMap(ctx context.Context, a *gomrv1.MapAssignment) *gomrv
 	}
 
 	// 5. Store partitions for HTTP serving and build URLs.
+	storeKey := partitionStoreKey(a.JobId, a.TaskId)
 	w.mu.Lock()
-	w.partitions = ps
+	oldStore := w.partitionStores[storeKey]
+	w.partitionStores[storeKey] = ps
 	w.mu.Unlock()
+	if oldStore != nil && oldStore != ps {
+		oldStore.Cleanup()
+	}
 
 	partitionURLs := ps.URLs(w.HTTPAddr)
 
