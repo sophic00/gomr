@@ -209,8 +209,6 @@ func (w *Worker) heartbeatLoop(ctx context.Context, client gomrv1.MasterServiceC
 				CurrentTask: w.CurrentTask,
 				LastResult:  w.lastResult,
 			}
-			// Clear lastResult after including it in the heartbeat.
-			w.lastResult = nil
 			w.mu.Unlock()
 
 			resp, err := client.Heartbeat(hbCtx, req)
@@ -231,6 +229,15 @@ func (w *Worker) heartbeatLoop(ctx context.Context, client gomrv1.MasterServiceC
 					}
 				}
 				continue
+			}
+
+			// Clear lastResult only if the heartbeat succeeded and the result hasn't changed.
+			if req.LastResult != nil {
+				w.mu.Lock()
+				if w.lastResult == req.LastResult {
+					w.lastResult = nil
+				}
+				w.mu.Unlock()
 			}
 
 			// Handle abort signal.
