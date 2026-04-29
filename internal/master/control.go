@@ -90,7 +90,26 @@ func (s *controlServer) Heartbeat(ctx context.Context, req *gomrv1.HeartbeatRequ
 	worker.LastHeartbeat = time.Now()
 	worker.CurrentTask = req.GetCurrentTask()
 
-	return &gomrv1.HeartbeatResponse{}, nil
+	resp := &gomrv1.HeartbeatResponse{}
+
+	// 1. Process task result if the worker is reporting one.
+	if result := req.GetLastResult(); result != nil {
+		s.master.processResult(req.GetWorkerId(), result)
+	}
+
+	// 2. If worker is idle, try to assign a new task.
+	if req.GetState() == gomrv1.WorkerState_WORKER_STATE_IDLE {
+		resp.Assignment = s.master.assignTask(req.GetWorkerId())
+	}
+
+	// 3. If worker is busy on an aborted job, tell it to stop.
+	if task := req.GetCurrentTask(); task != nil {
+		if job, exists := s.master.jobs[task.JobId]; exists && job.Status == JobStatusAborted {
+			resp.ShouldAbortCurrentTask = true
+		}
+	}
+
+	return resp, nil
 }
 
 func probeWorkerHTTP(ctx context.Context, client *http.Client, httpAddr string) error {

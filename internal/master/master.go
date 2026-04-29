@@ -153,25 +153,22 @@ func (m *Master) resetWorkerTasksLocked(workerID string) {
 	switch taskRef.Phase {
 	case gomrv1.TaskPhase_TASK_PHASE_MAP:
 		if mt, ok := job.MapTaskIndex[taskRef.TaskId]; ok {
-			resetTaskIfOwned(mt.ID, workerID, &mt.Status, &mt.WorkerID, job.ID, "map")
+			if mt.Status == TaskStatusInProgress && isTaskOwnedByWorker(mt.Attempts, workerID) {
+				slog.Info("resetting map task from dead worker",
+					"task_id", mt.ID, "job_id", job.ID, "worker_id", workerID,
+				)
+				mt.Status = TaskStatusIdle
+			}
 		}
 	case gomrv1.TaskPhase_TASK_PHASE_REDUCE:
 		if rt, ok := job.ReduceTaskIndex[taskRef.TaskId]; ok {
-			resetTaskIfOwned(rt.ID, workerID, &rt.Status, &rt.WorkerID, job.ID, "reduce")
+			if rt.Status == TaskStatusInProgress && isTaskOwnedByWorker(rt.Attempts, workerID) {
+				slog.Info("resetting reduce task from dead worker",
+					"task_id", rt.ID, "job_id", job.ID, "worker_id", workerID,
+				)
+				rt.Status = TaskStatusIdle
+			}
 		}
 	}
 }
 
-// resetTaskIfOwned resets a task back to Idle if it's in-progress and owned by the given worker.
-func resetTaskIfOwned(taskID, workerID string, status *TaskStatus, ownerID *string, jobID, phase string) {
-	if *status == TaskStatusInProgress && *ownerID == workerID {
-		slog.Info("resetting task from dead worker",
-			"phase", phase,
-			"task_id", taskID,
-			"job_id", jobID,
-			"worker_id", workerID,
-		)
-		*status = TaskStatusIdle
-		*ownerID = ""
-	}
-}

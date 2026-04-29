@@ -72,8 +72,9 @@ func (m *Master) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	var reduceTasks []*ReduceTask
 	for i := 0; i < sub.ReduceTasks; i++ {
 		reduceTasks = append(reduceTasks, &ReduceTask{
-			ID:     uuid.New().String(),
-			Status: TaskStatusIdle,
+			ID:        uuid.New().String(),
+			Partition: i,
+			Status:    TaskStatusIdle,
 		})
 	}
 
